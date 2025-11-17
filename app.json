@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Hevy Clone",
-    "slug": "Hevy Clone",
+    "slug": "heavily",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/unnamed.png",
@@ -19,7 +19,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.dazzzelr.heavily"
     },
     "web": {
       "output": "static",
@@ -43,6 +44,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b467649c-4487-4a5b-b6c5-b182013c28f9"
+      }
+    },
+    "owner": "dazzzelr"
   }
 }
