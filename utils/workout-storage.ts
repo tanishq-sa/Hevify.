@@ -6,6 +6,7 @@ const WORKOUT_DURATION_KEY = '@workout:duration';
 
 // Temporary storage for passing exercises between screens
 let pendingExercises: any[] = [];
+let replaceExerciseId: string | null = null;
 
 export const setPendingExercises = (exercises: any[]) => {
   pendingExercises = exercises;
@@ -15,6 +16,16 @@ export const getPendingExercises = () => {
   const exercises = [...pendingExercises];
   pendingExercises = [];
   return exercises;
+};
+
+export const setReplaceExerciseId = (exerciseId: string | null) => {
+  replaceExerciseId = exerciseId;
+};
+
+export const getReplaceExerciseId = () => {
+  const id = replaceExerciseId;
+  replaceExerciseId = null;
+  return id;
 };
 
 // Save current workout to local storage

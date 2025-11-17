@@ -1,11 +1,12 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { setPendingExercises } from '@/utils/workout-storage';
+import { getReplaceExerciseId, loadWorkoutData, saveWorkoutData, setPendingExercises } from '@/utils/workout-storage';
 import { useRouter } from 'expo-router';
 import { Search, TrendingUp } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../global.css';
+
 
 const mockExercises = [
   { 
@@ -125,6 +126,16 @@ export default function AddExerciseScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'equipment' | 'muscles'>('equipment');
   const [selectedExercises, setSelectedExercises] = useState<string[]>([]);
+  const [replaceExerciseId, setReplaceExerciseId] = useState<string | null>(null);
+  const [isReplaceMode, setIsReplaceMode] = useState(false);
+
+  useEffect(() => {
+    const replaceId = getReplaceExerciseId();
+    if (replaceId) {
+      setReplaceExerciseId(replaceId);
+      setIsReplaceMode(true);
+    }
+  }, []);
 
   const filteredExercises = mockExercises.filter((exercise) =>
     exercise.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -133,11 +144,19 @@ export default function AddExerciseScreen() {
   );
 
   const toggleExerciseSelection = (exerciseId: string) => {
-    setSelectedExercises(prev => 
-      prev.includes(exerciseId)
-        ? prev.filter(id => id !== exerciseId)
-        : [...prev, exerciseId]
-    );
+    if (isReplaceMode) {
+      // In replace mode, only allow one exercise to be selected
+      setSelectedExercises(prev => 
+        prev.includes(exerciseId) ? [] : [exerciseId]
+      );
+    } else {
+      // In add mode, allow multiple selections
+      setSelectedExercises(prev => 
+        prev.includes(exerciseId)
+          ? prev.filter(id => id !== exerciseId)
+          : [...prev, exerciseId]
+      );
+    }
   };
 
   const renderExerciseItem = ({ item }: { item: typeof mockExercises[0] }) => {
@@ -192,7 +211,7 @@ export default function AddExerciseScreen() {
           </Text>
         </Pressable>
         <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-          Add Exercise
+          {isReplaceMode ? 'Replace Exercise' : 'Add Exercise'}
         </Text>
         <Pressable>
           <Text className={`text-base ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
@@ -272,21 +291,65 @@ export default function AddExerciseScreen() {
         <View className={`absolute bottom-0 left-0 right-0 px-4 py-4 ${isDark ? 'bg-background-dark' : 'bg-background'} border-t ${isDark ? 'border-border-dark' : 'border-border'}`}>
           <Pressable
             className={`w-full py-4 rounded-lg flex-row items-center justify-center ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}
-            onPress={() => {
-              const selectedExercisesData = mockExercises.filter(ex => selectedExercises.includes(ex.id));
-              const exercisesToAdd = selectedExercisesData.map(ex => ({
-                id: ex.id,
-                name: ex.name,
-                primaryMuscle: ex.primaryMuscle,
-                secondaryMuscles: ex.secondaryMuscles,
-              }));
-              setPendingExercises(exercisesToAdd);
+            onPress={async () => {
+              if (isReplaceMode && replaceExerciseId) {
+                // Replace mode: replace the exercise in the workout data
+                const { exercises: currentExercises, duration } = await loadWorkoutData();
+                const exerciseIndex = currentExercises.findIndex((ex: any) => ex.id === replaceExerciseId);
+                
+                if (exerciseIndex !== -1 && selectedExercises.length > 0) {
+                  const selectedExerciseData = mockExercises.find(ex => ex.id === selectedExercises[0]);
+                  
+                  if (selectedExerciseData) {
+                    // Get the existing exercise to preserve sets, notes, and restTimer
+                    const existingExercise = currentExercises[exerciseIndex];
+                    
+                    // Replace with new exercise but preserve existing data
+                    const replacedExercise = {
+                      id: selectedExerciseData.id,
+                      name: selectedExerciseData.name,
+                      primaryMuscle: selectedExerciseData.primaryMuscle,
+                      secondaryMuscles: selectedExerciseData.secondaryMuscles,
+                      notes: existingExercise.notes || '',
+                      restTimer: existingExercise.restTimer || 50,
+                      sets: existingExercise.sets || [{
+                        id: Date.now().toString() + Math.random(),
+                        weight: 0,
+                        reps: 0,
+                        rpe: null,
+                        completed: false,
+                        setType: '1',
+                      }],
+                    };
+                    
+                    // Replace the exercise in the array
+                    const updatedExercises = [...currentExercises];
+                    updatedExercises[exerciseIndex] = replacedExercise;
+                    
+                    // Save the updated workout
+                    await saveWorkoutData(updatedExercises, duration);
+                  }
+                }
+              } else {
+                // Add mode: use pending exercises
+                const selectedExercisesData = mockExercises.filter(ex => selectedExercises.includes(ex.id));
+                const exercisesToAdd = selectedExercisesData.map(ex => ({
+                  id: ex.id,
+                  name: ex.name,
+                  primaryMuscle: ex.primaryMuscle,
+                  secondaryMuscles: ex.secondaryMuscles,
+                }));
+                setPendingExercises(exercisesToAdd);
+              }
               
               router.back();
             }}
           >
             <Text className={`text-lg font-semibold ${isDark ? 'text-primary-foreground-dark' : 'text-primary-foreground'}`}>
-              Add {selectedExercises.length} {selectedExercises.length === 1 ? 'exercise' : 'exercises'}
+              {isReplaceMode 
+                ? `Replace Exercise`
+                : `Add ${selectedExercises.length} ${selectedExercises.length === 1 ? 'exercise' : 'exercises'}`
+              }
             </Text>
           </Pressable>
         </View>
