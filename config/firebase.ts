@@ -16,6 +16,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize Auth
+// Note: Firebase Auth automatically persists auth state in React Native
+// The onAuthStateChanged listener in _layout.tsx will restore the session on app start
 const auth = getAuth(app);
 
 // Initialize Firestore
@@ -23,4 +25,3 @@ const db = getFirestore(app);
 
 export { auth, db };
 export default app;
-

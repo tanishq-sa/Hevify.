@@ -1,4 +1,5 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { DEFAULT_CLOCK_TIMER, DEFAULT_REST_TIMER, MAX_CLOCK_TIMER, MAX_REST_TIMER, REST_TIMER_OPTIONS } from '@/utils/workout-constants';
 import { clearWorkoutData, getPendingExercises, loadWorkoutData, saveWorkoutData, setReplaceExerciseId } from '@/utils/workout-storage';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
@@ -62,12 +63,14 @@ export default function LogWorkoutScreen() {
     exerciseId: null,
   });
   const [clockModal, setClockModal] = useState(false);
+  const [discardModal, setDiscardModal] = useState(false);
+  const isDiscardingRef = useRef(false);
   const [clockMode, setClockMode] = useState<'timer' | 'stopwatch'>('timer');
-  const [clockTime, setClockTime] = useState(60); // in seconds, default 1 minute
+  const [clockTime, setClockTime] = useState(DEFAULT_CLOCK_TIMER);
   const [clockRunning, setClockRunning] = useState(false);
   const clockStartTimeRef = useRef<number | null>(null);
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timerValueRef = useRef<number>(60); // Preserve timer value
+  const timerValueRef = useRef<number>(DEFAULT_CLOCK_TIMER); // Preserve timer value
   const stopwatchValueRef = useRef<number>(0); // Preserve stopwatch value
   const isModalOpeningRef = useRef(false);
   const isActionInProgressRef = useRef(false);
@@ -94,6 +97,9 @@ export default function LogWorkoutScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Reset discard flag when screen comes into focus
+      isDiscardingRef.current = false;
+      
       // Handle pending exercises first (new exercises to add)
       const newExercises = getPendingExercises();
       if (newExercises.length > 0) {
@@ -103,7 +109,7 @@ export default function LogWorkoutScreen() {
           primaryMuscle: ex.primaryMuscle,
           secondaryMuscles: ex.secondaryMuscles || [],
           notes: '',
-          restTimer: 50,
+          restTimer: DEFAULT_REST_TIMER,
           sets: [{
             id: Date.now().toString() + Math.random(),
             weight: 0,
@@ -127,12 +133,18 @@ export default function LogWorkoutScreen() {
           const updated = [...prev, ...toAdd];
           // Calculate current duration for saving
           const currentDuration = Math.floor((Date.now() - timerStartTimeRef.current) / 1000);
-          saveWorkoutData(updated, currentDuration);
+          // Only save if not discarding
+          if (!isDiscardingRef.current) {
+            saveWorkoutData(updated, currentDuration);
+          }
           return updated;
         });
       } else {
         // Only reload if no pending exercises (e.g., returning from reorder page)
         const reloadData = async () => {
+          // Don't reload if discarding
+          if (isDiscardingRef.current) return;
+          
           const { exercises: savedExercises, duration: savedDuration } = await loadWorkoutData();
           if (savedExercises.length > 0) {
             const migratedExercises = savedExercises.map(ex => ({
@@ -260,8 +272,15 @@ export default function LogWorkoutScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // TODO: enhance this with proper state management
-    }, [])
+      // Save duration when screen loses focus (user navigates away)
+      return () => {
+        // Don't save if workout is being discarded
+        if (!isDiscardingRef.current && isLoaded && exercises.length > 0) {
+          const elapsed = Math.floor((Date.now() - timerStartTimeRef.current) / 1000);
+          saveWorkoutData(exercises, elapsed);
+        }
+      };
+    }, [isLoaded, exercises])
   );
 
   const addSet = (exerciseId: string) => {
@@ -646,25 +665,15 @@ export default function LogWorkoutScreen() {
             </Text>
           </Pressable>
 
-          <View className="flex-row w-full gap-3">
-            <Pressable 
-              className={`flex-1 py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-            >
-              <Settings size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
-              <Text className={`mt-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                Settings
-              </Text>
-            </Pressable>
-            <Pressable 
-              className={`flex-1 py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-              onPress={() => router.back()}
-            >
-              <X size={20} color="#EF4444" />
-              <Text className="mt-2 text-destructive">
-                Discard Workout
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable 
+            className={`w-full py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            onPress={() => setDiscardModal(true)}
+          >
+            <X size={20} color="#EF4444" />
+            <Text className="mt-2 text-destructive">
+              Discard Workout
+            </Text>
+          </Pressable>
         </View>
       ) : (
         <ScrollView 
@@ -943,28 +952,15 @@ export default function LogWorkoutScreen() {
             </Text>
           </Pressable>
 
-          <View className="flex-row px-4 mb-6 gap-3">
-            <Pressable 
-              className={`flex-1 py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-            >
-              <Settings size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
-              <Text className={`mt-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                Settings
-              </Text>
-            </Pressable>
-            <Pressable 
-              className={`flex-1 py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-              onPress={async () => {
-                await clearWorkoutData();
-                router.back();
-              }}
-            >
-              <X size={20} color="#EF4444" />
-              <Text className="mt-2 text-destructive">
-                Discard Workout
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable 
+            className={`px-4 mb-6 py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            onPress={() => setDiscardModal(true)}
+          >
+            <X size={20} color="#EF4444" />
+            <Text className="mt-2 text-destructive">
+              Discard Workout
+            </Text>
+          </Pressable>
         </ScrollView>
       )}
 
@@ -1004,7 +1000,7 @@ export default function LogWorkoutScreen() {
                     
                     // Update exercise restTimer asynchronously (don't block UI)
                     setTimeout(() => {
-                      const newRestTimer = Math.min(exercise.restTimer + 15, 600);
+                      const newRestTimer = Math.min(exercise.restTimer + 15, MAX_REST_TIMER);
                       setExercises(prev => {
                         const updated = prev.map(ex => 
                           ex.id === activeRestTimer.exerciseId ? { ...ex, restTimer: newRestTimer } : ex
@@ -1271,9 +1267,7 @@ export default function LogWorkoutScreen() {
               const exercise = exercises.find(e => e.id === restTimerModal.exerciseId);
               if (!exercise) return null;
               
-              const restTimerOptions = [
-                30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 90, 120, 150, 180
-              ];
+              const restTimerOptions = REST_TIMER_OPTIONS;
               
               return (
                 <>
@@ -1673,13 +1667,13 @@ export default function LogWorkoutScreen() {
                         // Adjust running timer: add 15 seconds to remaining time
                         const elapsed = Math.floor((Date.now() - clockStartTimeRef.current) / 1000);
                         const currentRemaining = Math.max(0, clockTime - elapsed);
-                        const newRemaining = Math.min(currentRemaining + 15, 3600); // Max 1 hour
+                        const newRemaining = Math.min(currentRemaining + 15, MAX_CLOCK_TIMER);
                         // Adjust start time to account for the change
                         clockStartTimeRef.current = Date.now() - ((clockTime - newRemaining) * 1000);
                         setClockTime(newRemaining);
                       } else {
                         // Not running: just add to time
-                        setClockTime(prev => Math.min(prev + 15, 3600)); // Max 1 hour
+                        setClockTime(prev => Math.min(prev + 15, MAX_CLOCK_TIMER));
                       }
                     }}
                   >
@@ -1817,6 +1811,77 @@ export default function LogWorkoutScreen() {
             )}
           </View>
         </View>
+      </Modal>
+
+      {/* Discard Confirmation Modal */}
+      <Modal
+        visible={discardModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDiscardModal(false)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onPress={() => setDiscardModal(false)}
+        >
+          <Pressable
+            className={`rounded-2xl p-6 w-11/12 max-w-sm ${
+              isDark ? 'bg-card-dark' : 'bg-card'
+            }`}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text
+              className={`text-xl font-bold mb-2 ${
+                isDark ? 'text-foreground-dark' : 'text-foreground'
+              }`}
+            >
+              Discard Workout
+            </Text>
+            <Text
+              className={`text-base mb-6 ${
+                isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'
+              }`}
+            >
+              Are you sure you want to discard this workout? This action cannot be undone.
+            </Text>
+            
+            <View className="flex-row gap-3">
+              <Pressable
+                className={`flex-1 py-3 rounded-lg items-center ${
+                  isDark ? 'bg-muted-dark' : 'bg-muted'
+                }`}
+                onPress={() => setDiscardModal(false)}
+              >
+                <Text
+                  className={`font-semibold ${
+                    isDark ? 'text-foreground-dark' : 'text-foreground'
+                  }`}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+              
+              <Pressable
+                className="flex-1 py-3 rounded-lg items-center bg-destructive active:opacity-90"
+                onPress={async () => {
+                  // Set flag to prevent useFocusEffect from saving
+                  isDiscardingRef.current = true;
+                  // Clear exercises state immediately to prevent any saves
+                  setExercises([]);
+                  setDuration(0);
+                  await clearWorkoutData();
+                  setDiscardModal(false);
+                  router.back();
+                }}
+              >
+                <Text className="text-white font-semibold">
+                  Discard
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
       </SafeAreaView>
     </GestureHandlerRootView>

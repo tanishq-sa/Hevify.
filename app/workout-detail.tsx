@@ -1,13 +1,18 @@
+import { db } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getWorkoutById } from '@/utils/workout-storage';
+import { addComment, getWorkoutComments, getWorkoutLikes, toggleLike } from '@/utils/workout-interactions';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Lock, MessageCircle, MoreVertical, Share2, ThumbsUp } from 'lucide-react-native';
+import { doc, getDoc } from 'firebase/firestore';
+import { ChevronLeft, Lock, MessageCircle, MoreVertical, Send, ThumbsUp, X } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
     Image,
+    Modal,
     Pressable,
     ScrollView,
     Text,
+    TextInput,
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,22 +24,122 @@ export default function WorkoutDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const [workout, setWorkout] = useState<any>(null);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likesCount, setLikesCount] = useState(0);
+  const [comments, setComments] = useState<any[]>([]);
+  const [showCommentModal, setShowCommentModal] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [userInfo, setUserInfo] = useState<{ username: string; avatar: string } | null>(null);
 
   useEffect(() => {
     loadWorkout();
   }, []);
 
-  const loadWorkout = async () => {
+  useEffect(() => {
+    if (workout?.id) {
+      loadLikesAndComments();
+      loadUserInfo();
+    }
+  }, [workout?.id]);
+
+  const loadUserInfo = async () => {
     try {
-      const workoutId = params.id as string;
-      if (workoutId) {
-        const foundWorkout = await getWorkoutById(workoutId);
-        if (foundWorkout) {
-          setWorkout(foundWorkout);
+      if (workout?.userId) {
+        const userDoc = await getDoc(doc(db, 'users', workout.userId));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setUserInfo({
+            username: userData.username || userData.email?.split('@')[0] || 'User',
+            avatar: userData.avatar || 'https://i.pravatar.cc/150?img=12'
+          });
         }
       }
     } catch (error) {
+      console.error('Error loading user info:', error);
+    }
+  };
+
+  const loadWorkout = async () => {
+    try {
+      const workoutId = params.id as string;
+      console.log('Loading workout with ID:', workoutId);
+      if (workoutId) {
+        const foundWorkout = await getWorkoutById(workoutId);
+        console.log('Found workout:', foundWorkout ? 'Yes' : 'No');
+        if (foundWorkout) {
+          setWorkout(foundWorkout);
+        } else {
+          console.error('Workout not found with ID:', workoutId);
+        }
+      } else {
+        console.error('No workout ID provided in params');
+      }
+    } catch (error) {
       console.error('Error loading workout:', error);
+    }
+  };
+
+  const loadLikesAndComments = async () => {
+    try {
+      const workoutId = params.id as string;
+      if (workoutId) {
+        const likesData = await getWorkoutLikes(workoutId);
+        setIsLiked(likesData.liked);
+        setLikesCount(likesData.likesCount);
+
+        const commentsData = await getWorkoutComments(workoutId);
+        setComments(commentsData);
+      }
+    } catch (error) {
+      console.error('Error loading likes and comments:', error);
+    }
+  };
+
+  const handleLike = async () => {
+    try {
+      const workoutId = params.id as string;
+      if (workoutId) {
+        const result = await toggleLike(workoutId);
+        setIsLiked(result.liked);
+        setLikesCount(result.likesCount);
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+    }
+  };
+
+  const handleAddComment = async () => {
+    try {
+      if (!commentText.trim()) return;
+
+      const workoutId = params.id as string;
+      if (workoutId) {
+        await addComment(workoutId, commentText.trim());
+        setCommentText('');
+        setShowCommentModal(false);
+        await loadLikesAndComments(); // Reload comments
+      }
+    } catch (error) {
+      console.error('Error adding comment:', error);
+    }
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMs = now.getTime() - date.getTime();
+    const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInMinutes < 60) {
+      return `${diffInMinutes}m ago`;
+    } else if (diffInHours < 24) {
+      return `${diffInHours}h ago`;
+    } else if (diffInDays === 1) {
+      return '1d ago';
+    } else {
+      return `${diffInDays}d ago`;
     }
   };
 
@@ -136,12 +241,12 @@ export default function WorkoutDetailScreen() {
         <View className="p-4">
           <View className="flex-row items-center mb-3">
             <Image
-              source={{ uri: 'https://i.pravatar.cc/150?img=12' }}
+              source={{ uri: userInfo?.avatar || 'https://i.pravatar.cc/150?img=12' }}
               className="w-12 h-12 rounded-full mr-3"
             />
             <View className="flex-1">
               <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                dazzelr
+                {userInfo?.username || 'User'}
               </Text>
               <View className="flex-row items-center">
                 <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
@@ -208,20 +313,21 @@ export default function WorkoutDetailScreen() {
 
           {/* Action Buttons */}
           <View className="flex-row items-center gap-4 pt-3 border-t" style={{ borderTopColor: isDark ? '#27272A' : '#E4E4E7' }}>
-            <Pressable className="flex-row items-center">
-              <ThumbsUp size={20} color={isDark ? '#9BA1A6' : '#687076'} />
-              <Text className={`ml-2 text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                0
+            <Pressable className="flex-row items-center" onPress={handleLike}>
+              <ThumbsUp 
+                size={20} 
+                color={isLiked ? '#3B82F6' : (isDark ? '#9BA1A6' : '#687076')} 
+                fill={isLiked ? '#3B82F6' : 'none'}
+              />
+              <Text className={`ml-2 text-sm ${isLiked ? 'text-primary' : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')}`}>
+                {likesCount}
               </Text>
             </Pressable>
-            <Pressable className="flex-row items-center">
+            <Pressable className="flex-row items-center" onPress={() => setShowCommentModal(true)}>
               <MessageCircle size={20} color={isDark ? '#9BA1A6' : '#687076'} />
               <Text className={`ml-2 text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                0
+                {comments.length}
               </Text>
-            </Pressable>
-            <Pressable className="flex-row items-center">
-              <Share2 size={20} color={isDark ? '#9BA1A6' : '#687076'} />
             </Pressable>
           </View>
         </View>
@@ -262,11 +368,6 @@ export default function WorkoutDetailScreen() {
             <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
               Workout
             </Text>
-            <Pressable>
-              <Text className="text-base font-semibold" style={{ color: '#3B82F6' }}>
-                Edit Workout
-              </Text>
-            </Pressable>
           </View>
 
           {workout.exercises.map((exercise: any, exerciseIndex: number) => (
@@ -345,7 +446,93 @@ export default function WorkoutDetailScreen() {
             </View>
           ))}
         </View>
+
+        {/* Comments Section */}
+        {comments.length > 0 && (
+          <View className="mt-4 p-4">
+            <Text className={`text-base font-semibold mb-3 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              Comments ({comments.length})
+            </Text>
+            {comments.map((comment) => (
+              <View key={comment.id} className="mb-4">
+                <View className="flex-row items-start">
+                  <View className={`w-8 h-8 rounded-full items-center justify-center mr-2 ${isDark ? 'bg-muted-dark' : 'bg-muted'}`}>
+                    <Text className="text-xs">
+                      {comment.username?.[0]?.toUpperCase() || 'U'}
+                    </Text>
+                  </View>
+                  <View className="flex-1">
+                    <View className="flex-row items-center mb-1">
+                      <Text className={`text-sm font-semibold mr-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                        {comment.username}
+                      </Text>
+                      <Text className={`text-xs ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                        {formatTimeAgo(comment.createdAt)}
+                      </Text>
+                    </View>
+                    <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                      {comment.text}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
+
+      {/* Comment Modal */}
+      <Modal
+        visible={showCommentModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCommentModal(false)}
+      >
+        <Pressable
+          className="flex-1"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onPress={() => setShowCommentModal(false)}
+        >
+          <Pressable
+            className={`absolute bottom-0 left-0 right-0 ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            style={{ borderTopLeftRadius: 20, borderTopRightRadius: 20 }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View className="p-4">
+              <View className="flex-row items-center justify-between mb-4">
+                <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  Add Comment
+                </Text>
+                <Pressable onPress={() => setShowCommentModal(false)}>
+                  <X size={24} color={isDark ? '#F5F5F5' : '#11181C'} />
+                </Pressable>
+              </View>
+
+              <TextInput
+                className={`${isDark ? 'bg-muted-dark text-foreground-dark' : 'bg-muted text-foreground'} rounded-lg p-3 mb-4`}
+                placeholder="Write a comment..."
+                placeholderTextColor={isDark ? '#9BA1A6' : '#687076'}
+                value={commentText}
+                onChangeText={setCommentText}
+                multiline
+                numberOfLines={4}
+                style={{ minHeight: 100, textAlignVertical: 'top' }}
+              />
+
+              <Pressable
+                className={`flex-row items-center justify-center py-3 rounded-lg ${commentText.trim() ? 'bg-primary' : (isDark ? 'bg-muted-dark' : 'bg-muted')}`}
+                onPress={handleAddComment}
+                disabled={!commentText.trim()}
+              >
+                <Send size={18} color={commentText.trim() ? '#FFFFFF' : (isDark ? '#9BA1A6' : '#687076')} />
+                <Text className={`ml-2 font-semibold ${commentText.trim() ? 'text-white' : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')}`}>
+                  Post Comment
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }

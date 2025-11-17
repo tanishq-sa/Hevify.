@@ -1,14 +1,14 @@
-import { auth } from '@/config/firebase';
+import { auth, db } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getCompletedWorkouts } from '@/utils/workout-storage';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { getWorkoutComments, getWorkoutLikes, toggleLike } from '@/utils/workout-interactions';
+import { useRouter } from 'expo-router';
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import {
   Bell,
   ChevronDown,
   Lock,
   MessageCircle,
   Search,
-  Share2,
   ThumbsUp,
   Trophy,
   X
@@ -25,142 +25,211 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../../global.css';
 
-// Mock data for workouts
-const mockWorkouts = [
-  {
-    id: '1',
-    username: 'dazzelr',
-    avatar: 'https://i.pravatar.cc/150?img=12',
-    timeAgo: 'Yesterday',
-    isPrivate: true,
-    title: 'Afternoon workout 💪',
-    stats: {
-      time: '59min',
-      volume: '10,041 kg',
-      records: 10
-    },
-    exercises: [
-      { name: 'Pull Up', sets: 2, icon: '🏋️' },
-      { name: 'Lat Pulldown - Close Grip (Cable)', sets: 3, icon: '🏋️' },
-      { name: 'Straight Arm Lat Pulldown (Cable)', sets: 2, icon: '🏋️' }
-    ],
-    totalExercises: 10,
-    likes: 24,
-    comments: 5,
-    shares: 3
-  },
-  {
-    id: '2',
-    username: 'fitness_pro',
-    avatar: 'https://i.pravatar.cc/150?img=33',
-    timeAgo: '2 hours ago',
-    isPrivate: false,
-    title: 'Leg Day 🦵',
-    stats: {
-      time: '75min',
-      volume: '15,230 kg',
-      records: 5
-    },
-    exercises: [
-      { name: 'Squat', sets: 4, icon: '🏋️' },
-      { name: 'Romanian Deadlift', sets: 3, icon: '🏋️' },
-      { name: 'Leg Press', sets: 3, icon: '🏋️' }
-    ],
-    totalExercises: 8,
-    likes: 42,
-    comments: 12,
-    shares: 8
-  },
-  {
-    id: '3',
-    username: 'strength_master',
-    avatar: 'https://i.pravatar.cc/150?img=45',
-    timeAgo: '3 hours ago',
-    isPrivate: false,
-    title: 'Push Day 💥',
-    stats: {
-      time: '65min',
-      volume: '12,500 kg',
-      records: 7
-    },
-    exercises: [
-      { name: 'Bench Press', sets: 4, icon: '🏋️' },
-      { name: 'Overhead Press', sets: 3, icon: '🏋️' },
-      { name: 'Tricep Dips', sets: 3, icon: '🏋️' }
-    ],
-    totalExercises: 9,
-    likes: 38,
-    comments: 8,
-    shares: 5
-  },
-  {
-    id: '4',
-    username: 'cardio_queen',
-    avatar: 'https://i.pravatar.cc/150?img=28',
-    timeAgo: '5 hours ago',
-    isPrivate: false,
-    title: 'Cardio Blast 🔥',
-    stats: {
-      time: '45min',
-      volume: '8,200 kg',
-      records: 3
-    },
-    exercises: [
-      { name: 'Running', sets: 1, icon: '🏃' },
-      { name: 'Rowing', sets: 3, icon: '🚣' },
-      { name: 'Cycling', sets: 2, icon: '🚴' }
-    ],
-    totalExercises: 6,
-    likes: 56,
-    comments: 15,
-    shares: 12
-  },
-  {
-    id: '5',
-    username: 'yoga_zen',
-    avatar: 'https://i.pravatar.cc/150?img=52',
-    timeAgo: '1 day ago',
-    isPrivate: false,
-    title: 'Morning Flow 🧘',
-    stats: {
-      time: '30min',
-      volume: '0 kg',
-      records: 2
-    },
-    exercises: [
-      { name: 'Sun Salutation', sets: 3, icon: '🧘' },
-      { name: 'Warrior Poses', sets: 2, icon: '🧘' }
-    ],
-    totalExercises: 5,
-    likes: 29,
-    comments: 6,
-    shares: 4
+// Function to fetch suggested athletes (other users)
+const fetchSuggestedAthletes = async (currentUserId: string, limitCount: number = 10) => {
+  try {
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, limit(limitCount));
+    const querySnapshot = await getDocs(q);
+    
+      const users: any[] = [];
+      querySnapshot.forEach((doc) => {
+        const userData = doc.data();
+        // Exclude current user
+        if (doc.id !== currentUserId) {
+          users.push({
+            id: doc.id,
+            username: userData.username || userData.email?.split('@')[0] || 'User',
+            avatar: userData.avatar || null // Only use Firebase avatar, no fallback
+          });
+        }
+      });
+    
+    // Shuffle and return up to 4 users
+    return shuffleArray(users).slice(0, 4);
+  } catch (error) {
+    console.error('Error fetching suggested athletes:', error);
+    return [];
   }
-];
+};
 
-// Mock data for suggested athletes
-const suggestedAthletes = [
-  {
-    id: '1',
-    username: 'rissa88',
-    avatar: 'https://i.pravatar.cc/150?img=47'
-  },
-  {
-    id: '2',
-    username: 'leah',
-    avatar: 'https://i.pravatar.cc/150?img=20'
-  },
-  {
-    id: '3',
-    username: 'ge',
-    avatar: 'https://i.pravatar.cc/150?img=15'
-  },
-  {
-    id: '4',
-    username: 'fit_mike',
-    avatar: 'https://i.pravatar.cc/150?img=32'
+// Track if we've already warned about the missing index
+let hasWarnedAboutPublicWorkoutIndex = false;
+
+// Function to fetch public workouts from all users
+const fetchPublicWorkouts = async (limitCount: number = 50) => {
+  try {
+    const workoutsRef = collection(db, 'workouts');
+    
+    try {
+      // Query for public workouts (visibility === 'Everyone')
+      const q = query(
+        workoutsRef,
+        where('visibility', '==', 'Everyone'),
+        orderBy('createdAt', 'desc'),
+        limit(limitCount)
+      );
+
+      const querySnapshot = await getDocs(q);
+      const workouts: any[] = [];
+      const userIds = new Set<string>();
+      
+      // Collect all unique user IDs
+      querySnapshot.docs.forEach((workoutDoc) => {
+        const workoutData = workoutDoc.data();
+        if (workoutData.userId) {
+          userIds.add(workoutData.userId);
+        }
+      });
+      
+      // Batch fetch all user data
+      const userDataMap = new Map<string, any>();
+      await Promise.all(
+        Array.from(userIds).map(async (userId) => {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', userId));
+            if (userDoc.exists()) {
+              userDataMap.set(userId, userDoc.data());
+            }
+          } catch (error) {
+            console.error(`Error fetching user data for ${userId}:`, error);
+          }
+        })
+      );
+      
+      // Map workouts with user data
+      querySnapshot.docs.forEach((workoutDoc) => {
+        const workoutData = workoutDoc.data();
+        const userData = workoutData.userId ? userDataMap.get(workoutData.userId) : null;
+        
+        const workout: any = {
+          id: workoutDoc.id,
+          ...workoutData,
+          username: userData?.username || userData?.email?.split('@')[0] || 'User',
+          avatar: userData?.avatar || null, // Only use Firebase avatar, no fallback
+        };
+        
+        // Log workout data for debugging
+        console.log('Workout from Firebase:', {
+          id: workout.id,
+          title: workout.title,
+          userId: workout.userId,
+          username: workout.username,
+          avatar: workout.avatar,
+          userDataAvatar: userData?.avatar,
+          userDataExists: !!userData,
+          userDataKeys: userData ? Object.keys(userData) : [],
+          visibility: workout.visibility,
+          duration: workout.duration,
+          volume: workout.volume,
+          sets: workout.sets,
+          exercisesCount: workout.exercises?.length || 0,
+          likesCount: workout.likes?.length || 0,
+          commentsCount: workout.comments?.length || 0,
+          createdAt: workout.createdAt,
+        });
+        
+        workouts.push(workout);
+      });
+      
+      console.log(`Total workouts fetched from Firebase: ${workouts.length}`);
+      return workouts;
+    } catch (indexError: any) {
+      // If index error, fall back to simpler query without orderBy
+      if (indexError.code === 'failed-precondition' || indexError.message?.includes('index')) {
+        // Only warn once per app session
+        if (!hasWarnedAboutPublicWorkoutIndex) {
+          console.warn('Firestore index required for public workouts query. Using fallback query without ordering.');
+          console.warn('To create the index, go to Firebase Console > Firestore > Indexes and create:');
+          console.warn('Collection: workouts, Fields: visibility (Ascending), createdAt (Descending)');
+          hasWarnedAboutPublicWorkoutIndex = true;
+        }
+        
+        const q = query(
+          workoutsRef,
+          where('visibility', '==', 'Everyone'),
+          limit(limitCount)
+        );
+        
+        const querySnapshot = await getDocs(q);
+        const workouts: any[] = [];
+        const userIds = new Set<string>();
+        
+        // Collect all unique user IDs
+        querySnapshot.docs.forEach((workoutDoc) => {
+          const workoutData = workoutDoc.data();
+          if (workoutData.userId) {
+            userIds.add(workoutData.userId);
+          }
+        });
+        
+        // Batch fetch all user data
+        const userDataMap = new Map<string, any>();
+        await Promise.all(
+          Array.from(userIds).map(async (userId) => {
+            try {
+              const userDoc = await getDoc(doc(db, 'users', userId));
+              if (userDoc.exists()) {
+                userDataMap.set(userId, userDoc.data());
+              }
+            } catch (error) {
+              console.error(`Error fetching user data for ${userId}:`, error);
+            }
+          })
+        );
+        
+        // Map workouts with user data
+        querySnapshot.docs.forEach((workoutDoc) => {
+          const workoutData = workoutDoc.data();
+          const userData = workoutData.userId ? userDataMap.get(workoutData.userId) : null;
+          
+          const workout: any = {
+            id: workoutDoc.id,
+            ...workoutData,
+            username: userData?.username || userData?.email?.split('@')[0] || 'User',
+            avatar: userData?.avatar || null, // Only use Firebase avatar, no fallback
+          };
+          
+          // Log workout data for debugging
+          console.log('Workout from Firebase (fallback):', {
+            id: workout.id,
+            title: workout.title,
+            userId: workout.userId,
+            username: workout.username,
+            avatar: workout.avatar,
+            userDataAvatar: userData?.avatar,
+            userDataExists: !!userData,
+            userDataKeys: userData ? Object.keys(userData) : [],
+            visibility: workout.visibility,
+            duration: workout.duration,
+            volume: workout.volume,
+            sets: workout.sets,
+            exercisesCount: workout.exercises?.length || 0,
+            likesCount: workout.likes?.length || 0,
+            commentsCount: workout.comments?.length || 0,
+            createdAt: workout.createdAt,
+          });
+          
+          workouts.push(workout);
+        });
+        
+        // Sort in memory by createdAt
+        workouts.sort((a, b) => {
+          const dateA = new Date(a.createdAt || 0).getTime();
+          const dateB = new Date(b.createdAt || 0).getTime();
+          return dateB - dateA;
+        });
+        
+        console.log(`Total workouts fetched from Firebase (fallback): ${workouts.length}`);
+        return workouts;
+      }
+      throw indexError;
+    }
+  } catch (error) {
+    console.error('Error fetching public workouts:', error);
+    return [];
   }
-];
+};
 
 type FeedType = 'Home' | 'Discover' | 'Random feed';
 
@@ -180,15 +249,31 @@ export default function HomeScreen() {
   const router = useRouter();
   const [selectedFeed, setSelectedFeed] = useState<FeedType>('Home');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [displayedWorkouts, setDisplayedWorkouts] = useState(mockWorkouts);
+    const [displayedWorkouts, setDisplayedWorkouts] = useState([]);
   const [completedWorkouts, setCompletedWorkouts] = useState<any[]>([]);
+  const [suggestedAthletes, setSuggestedAthletes] = useState<Array<{ id: string; username: string; avatar: string }>>([]);
 
-  // Load completed workouts from storage
-  useFocusEffect(
-    React.useCallback(() => {
-      loadCompletedWorkouts();
-    }, [])
-  );
+  // Load completed workouts and suggested athletes once when screen mounts
+  useEffect(() => {
+    loadCompletedWorkouts();
+    loadSuggestedAthletes();
+    // We intentionally fetch only once on mount; user must pull-to-refresh or reopen app to refresh feed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadSuggestedAthletes = async () => {
+    try {
+      if (!auth.currentUser) {
+        setSuggestedAthletes([]);
+        return;
+      }
+      
+      const athletes = await fetchSuggestedAthletes(auth.currentUser.uid, 10);
+      setSuggestedAthletes(athletes);
+    } catch (error) {
+      console.error('Error loading suggested athletes:', error);
+    }
+  };
 
   const loadCompletedWorkouts = async () => {
     try {
@@ -197,34 +282,63 @@ export default function HomeScreen() {
         return;
       }
 
-      const workouts = await getCompletedWorkouts(50);
-      setCompletedWorkouts(workouts);
+      // Fetch public workouts from all users
+      const workouts = await fetchPublicWorkouts(50);
       
-      // Convert completed workouts to feed format
-      const formattedWorkouts = workouts.map((workout: any) => ({
-        id: workout.id,
-        username: auth.currentUser?.email?.split('@')[0] || 'User',
-        avatar: 'https://i.pravatar.cc/150?img=12',
-        timeAgo: formatTimeAgo(workout.createdAt || workout.date),
-        isPrivate: workout.visibility === 'Only me',
-        title: workout.title,
-        stats: {
-          time: formatDuration(workout.duration),
-          volume: `${workout.volume || 0} kg`,
-          records: 0
-        },
-        exercises: (workout.exercises || []).slice(0, 3).map((ex: any) => ({
-          name: ex.name,
-          sets: (ex.sets || []).filter((s: any) => s.completed).length,
-          icon: '🏋️'
-        })),
-        totalExercises: (workout.exercises || []).length,
-        likes: 0,
-        comments: 0,
-        shares: 0
-      }));
+      if (workouts.length === 0) {
+        console.log('No public workouts found in Firebase');
+        setDisplayedWorkouts([]);
+        return;
+      }
+
+      console.log(`Fetched ${workouts.length} public workouts from Firebase`);
+      console.log('Raw workout data from Firebase:', JSON.stringify(workouts.slice(0, 2), null, 2));
       
-      setDisplayedWorkouts(formattedWorkouts);
+      // Convert workouts to feed format - preserve all Firebase data
+      const formattedWorkouts = workouts.map((workout: any) => {
+        const completedSetsCount = (workout.exercises || []).reduce((total: number, ex: any) => {
+          return total + ((ex.sets || []).filter((s: any) => s.completed).length);
+        }, 0);
+        
+        // Use the avatar that was already set from Firebase user data
+        console.log('Formatting workout:', {
+          id: workout.id,
+          username: workout.username,
+          avatarFromWorkout: workout.avatar,
+        });
+        
+        return {
+          id: workout.id,
+          username: workout.username || 'User',
+          avatar: workout.avatar || null, // Only use Firebase avatar, no fallback
+          timeAgo: formatTimeAgo(workout.createdAt || workout.date),
+          isPrivate: workout.visibility === 'Private' || workout.visibility === 'Only me',
+          title: workout.title || 'Untitled Workout',
+          description: workout.description || '',
+          stats: {
+            time: formatDuration(workout.duration || 0),
+            volume: `${workout.volume || 0} kg`,
+            records: workout.stats?.records || 0
+          },
+          exercises: (workout.exercises || []).slice(0, 3).map((ex: any) => ({
+            name: ex.name || 'Exercise',
+            sets: (ex.sets || []).filter((s: any) => s.completed).length,
+            icon: '🏋️'
+          })),
+          totalExercises: (workout.exercises || []).length,
+          totalSets: workout.sets || completedSetsCount,
+          totalVolume: workout.volume || 0,
+          likes: workout.likes?.length || 0,
+          comments: workout.comments?.length || 0,
+          shares: 0,
+          // Preserve all original Firebase data
+          rawData: workout
+        };
+      });
+      
+      setDisplayedWorkouts(formattedWorkouts as any);
+      console.log(`Displayed ${formattedWorkouts.length} workouts in feed`);
+      console.log('Sample formatted workout:', JSON.stringify(formattedWorkouts[0], null, 2));
     } catch (error) {
       console.error('Error loading completed workouts:', error);
       setDisplayedWorkouts([]);
@@ -265,20 +379,103 @@ export default function HomeScreen() {
     loadCompletedWorkouts();
   }, [selectedFeed]);
 
-  const renderWorkoutCard = ({ item }: { item: typeof mockWorkouts[0] }) => (
+  // Component for like button with state
+  const WorkoutLikeButton = ({ workoutId }: { workoutId: string }) => {
+    const [isLiked, setIsLiked] = useState(false);
+    const [likesCount, setLikesCount] = useState(0);
+
+    useEffect(() => {
+      const loadLikeStatus = async () => {
+        try {
+          const likesData = await getWorkoutLikes(workoutId);
+          setIsLiked(likesData.liked);
+          setLikesCount(likesData.likesCount);
+        } catch (error) {
+          console.error('Error loading like status:', error);
+        }
+      };
+      if (workoutId) {
+        loadLikeStatus();
+      }
+    }, [workoutId]);
+
+    const handleLike = async (e: any) => {
+      e.stopPropagation();
+      try {
+        const result = await toggleLike(workoutId);
+        setIsLiked(result.liked);
+        setLikesCount(result.likesCount);
+      } catch (error) {
+        console.error('Error toggling like:', error);
+      }
+    };
+
+    return (
+      <Pressable className="flex-row items-center mr-6" onPress={handleLike}>
+        <ThumbsUp 
+          size={20} 
+          color={isLiked ? '#3B82F6' : (isDark ? '#94A3B8' : '#64748B')} 
+          fill={isLiked ? '#3B82F6' : 'none'}
+        />
+        <Text className={`ml-2 ${isLiked ? 'text-primary' : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')}`}>
+          {likesCount}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  // Component for comment button with count from Firebase
+  const WorkoutCommentButton = ({ workoutId }: { workoutId: string }) => {
+    const [commentsCount, setCommentsCount] = useState(0);
+
+    useEffect(() => {
+      const loadCommentCount = async () => {
+        try {
+          const comments = await getWorkoutComments(workoutId);
+          setCommentsCount(comments.length);
+        } catch (error) {
+          console.error('Error loading comment count:', error);
+        }
+      };
+      if (workoutId) {
+        loadCommentCount();
+      }
+    }, [workoutId]);
+
+    return (
+      <Pressable 
+        className="flex-row items-center mr-6"
+        onPress={() => {
+          if (workoutId) {
+            router.push(`/workout-detail?id=${workoutId}`);
+          }
+        }}
+      >
+        <MessageCircle size={20} color={isDark ? '#94A3B8' : '#64748B'} />
+        <Text className={`ml-2 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+          {commentsCount}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderWorkoutCard = ({ item }: { item: any }) => (
     <Pressable 
       className={`mb-4 mx-4 p-4 rounded-2xl ${isDark ? 'bg-card-dark' : 'bg-card'}`}
       onPress={() => {
         // Only navigate if it's a saved workout (has valid id)
         if (item.id) {
+          console.log('Navigating to workout detail with ID:', item.id);
           router.push(`/workout-detail?id=${item.id}`);
+        } else {
+          console.error('Cannot navigate: workout has no ID');
         }
       }}
     >
       {/* User Header */}
       <View className="flex-row items-center mb-3">
         <Image
-          source={{ uri: item.avatar }}
+          source={{ uri: item.avatar || 'https://i.pravatar.cc/150?img=12' }}
           className="w-12 h-12 rounded-full mr-3"
         />
         <View className="flex-1">
@@ -302,9 +499,16 @@ export default function HomeScreen() {
       </View>
 
       {/* Workout Title */}
-      <Text className={`text-2xl font-bold mb-4 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+      <Text className={`text-2xl font-bold mb-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
         {item.title}
       </Text>
+      
+      {/* Description - Show if available */}
+      {((item as any).description && (item as any).description.trim()) && (
+        <Text className={`text-sm mb-4 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+          {(item as any).description}
+        </Text>
+      )}
 
       {/* Stats */}
       <View className="flex-row mb-4">
@@ -313,7 +517,7 @@ export default function HomeScreen() {
             Time
           </Text>
           <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-            {item.stats.time}
+            {item.stats?.time || formatDuration((item as any).rawData?.duration || 0)}
           </Text>
         </View>
         <View className="mr-6">
@@ -321,7 +525,15 @@ export default function HomeScreen() {
             Volume
           </Text>
           <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-            {item.stats.volume}
+            {item.stats?.volume || `${(item as any).rawData?.volume || (item as any).totalVolume || 0} kg`}
+          </Text>
+        </View>
+        <View className="mr-6">
+          <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+            Sets
+          </Text>
+          <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+            {(item as any).rawData?.sets || (item as any).totalSets || 0}
           </Text>
         </View>
         <View>
@@ -339,42 +551,34 @@ export default function HomeScreen() {
 
       {/* Exercises */}
       <View className="mb-3">
-        {item.exercises.map((exercise, index) => (
-          <View key={index} className="flex-row items-center mb-2">
-            <Text className={`flex-1 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-              {exercise.sets} sets {exercise.name}
-            </Text>
-          </View>
-        ))}
-        {item.totalExercises > item.exercises.length && (
-          <Pressable>
-            <Text className={`text-sm mt-2 ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
-              See {item.totalExercises - item.exercises.length} more exercises
-            </Text>
-          </Pressable>
+        {item.exercises && item.exercises.length > 0 ? (
+          <>
+            {item.exercises.map((exercise: any, index: number) => (
+              <View key={index} className="flex-row items-center mb-2">
+                <Text className={`flex-1 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  {exercise.sets} sets {exercise.name}
+                </Text>
+              </View>
+            ))}
+            {item.totalExercises > item.exercises.length && (
+              <Pressable>
+                <Text className={`text-sm mt-2 ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
+                  See {item.totalExercises - item.exercises.length} more exercises
+                </Text>
+              </Pressable>
+            )}
+          </>
+        ) : (
+          <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+            No exercises in this workout
+          </Text>
         )}
       </View>
 
       {/* Interaction Buttons */}
       <View className={`flex-row items-center pt-3 ${isDark ? 'border-t border-border-dark' : 'border-t border-border'}`}>
-        <Pressable className="flex-row items-center mr-6">
-          <ThumbsUp size={20} color={isDark ? '#94A3B8' : '#64748B'} />
-          <Text className={`ml-2 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-            {item.likes}
-          </Text>
-        </Pressable>
-        <Pressable className="flex-row items-center mr-6">
-          <MessageCircle size={20} color={isDark ? '#94A3B8' : '#64748B'} />
-          <Text className={`ml-2 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-            {item.comments}
-          </Text>
-        </Pressable>
-        <Pressable className="flex-row items-center">
-          <Share2 size={20} color={isDark ? '#94A3B8' : '#64748B'} />
-          <Text className={`ml-2 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-            {item.shares}
-          </Text>
-        </Pressable>
+        <WorkoutLikeButton workoutId={item.id} />
+        <WorkoutCommentButton workoutId={item.id} />
       </View>
     </Pressable>
   );
@@ -383,7 +587,7 @@ export default function HomeScreen() {
     <View className="mr-3 items-center">
       <View className="relative">
         <Image
-          source={{ uri: item.avatar }}
+          source={{ uri: item.avatar || 'https://i.pravatar.cc/150?img=12' }}
           className="w-16 h-16 rounded-full"
         />
         <Pressable className="absolute -top-1 -right-1 bg-destructive rounded-full p-1">
@@ -444,7 +648,7 @@ export default function HomeScreen() {
                     : (isDark ? 'text-foreground-dark' : 'text-foreground')
                   }`}>
                     {option}
-                  </Text>
+          </Text>
                 </Pressable>
               ))}
             </View>

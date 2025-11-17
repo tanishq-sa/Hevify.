@@ -28,6 +28,8 @@
 ```typescript
 {
   userId: string (user UID),
+  username: string,            // denormalized for faster feed rendering
+  avatar?: string,             // denormalized avatar URL used in feed
   title: string,
   description?: string,
   duration: number (seconds),
@@ -51,6 +53,15 @@
   volume: number (total kg),
   sets: number (total completed sets),
   visibility: 'Everyone' | 'Only me',
+  likes?: string[],            // list of userIds who liked this workout
+  comments?: Array<{
+    id: string,
+    userId: string,
+    username: string,
+    avatar?: string,
+    text: string,
+    createdAt: string
+  }>,
   createdAt: string (ISO timestamp),
   updatedAt?: string (ISO timestamp)
 }
@@ -108,9 +119,12 @@
 
 ### Composite Indexes (create in Firebase Console):
 
-1. **workouts collection**:
+1. **workouts collection (user feed)**:
    - Fields: `userId` (Ascending), `createdAt` (Descending)
-   - Query: Get user's workouts ordered by date
+   - Query: Get a user's workouts ordered by date
+2. **workouts collection (public feed)**:
+   - Fields: `visibility` (Ascending), `createdAt` (Descending)
+   - Query: Get `visibility == 'Everyone'` ordered by date for the home feed
 
 ## Security Rules (Firestore Rules)
 

@@ -3,14 +3,15 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { updateUserStats } from '@/utils/firestore-init';
 import { clearWorkoutData as clearWorkout, loadWorkoutData as loadWorkout, saveCompletedWorkout } from '@/utils/workout-storage';
 import { useRouter } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, Lock, Users } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    Text,
-    TextInput,
-    View
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../global.css';
@@ -22,7 +23,8 @@ export default function SaveWorkoutScreen() {
   
   const [workoutTitle, setWorkoutTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [visibility, setVisibility] = useState('Everyone');
+  const [visibility, setVisibility] = useState<'Everyone' | 'Private'>('Everyone');
+  const [visibilityModal, setVisibilityModal] = useState(false);
 
   // Load workout data from storage
   const [workoutData, setWorkoutData] = useState<any>(null);
@@ -77,41 +79,80 @@ export default function SaveWorkoutScreen() {
 
   const handleSave = async () => {
     try {
-      // Create workout summary
+      // Filter exercises to only include those with completed sets
+      // And filter sets to only include completed ones
+      const filteredExercises = (workoutData?.exercises || [])
+        .map((exercise: any) => {
+          // Filter to only completed sets
+          const completedSets = (exercise.sets || []).filter((set: any) => set.completed);
+          
+          // Only include exercise if it has at least one completed set
+          if (completedSets.length === 0) {
+            return null;
+          }
+          
+          return {
+            ...exercise,
+            sets: completedSets, // Only include completed sets
+          };
+        })
+        .filter((exercise: any) => exercise !== null); // Remove exercises with no completed sets
+
+      // Calculate stats from filtered exercises (only completed sets)
+      const totalVolume = calculateTotalVolume(filteredExercises);
+      const totalSets = calculateTotalSets(filteredExercises);
+
+      // Create workout summary with only completed sets
       const workoutSummary = {
         title: workoutTitle || 'Workout title',
         description: description || '',
         duration: workoutData?.duration || 0,
-        exercises: workoutData?.exercises || [],
-        volume: calculateTotalVolume(workoutData?.exercises || []),
-        sets: calculateTotalSets(workoutData?.exercises || []),
+        exercises: filteredExercises, // Only exercises with completed sets
+        volume: totalVolume, // Only counts completed sets
+        sets: totalSets, // Only counts completed sets
         visibility,
       };
 
-      // Save to Firestore
+      // Save to Firestore (only after clicking Save)
       await saveCompletedWorkout(workoutSummary);
 
-      // Update user stats
+      // Update user stats (only counts completed sets)
       if (auth.currentUser) {
         await updateUserStats(auth.currentUser.uid, {
-          volume: workoutSummary.volume,
-          sets: workoutSummary.sets,
+          volume: totalVolume,
+          sets: totalSets,
         });
       }
-
-      // Clear current workout data
-      await clearWorkout();
-
-      // Navigate to home
-      router.replace('/(tabs)');
     } catch (error) {
       console.error('Error saving workout:', error);
+      throw error; // Re-throw to prevent navigation if save fails
+    } finally {
+      // Always clear local workout data after save attempt
+      // This ensures local storage and memory are cleared even if there's an error
+      try {
+        await clearWorkout();
+        // Also clear component state to free memory
+        setWorkoutData(null);
+        setWorkoutTitle('');
+        setDescription('');
+        setVisibility('Everyone');
+      } catch (clearError) {
+        console.error('Error clearing workout data:', clearError);
+      }
     }
+
+    // Navigate to home only after successful save
+    router.replace('/(tabs)');
   };
 
   const handleDiscard = async () => {
     try {
       await clearWorkout();
+      // Clear component state to free memory
+      setWorkoutData(null);
+      setWorkoutTitle('');
+      setDescription('');
+      setVisibility('Everyone');
       router.replace('/(tabs)');
     } catch (error) {
       console.error('Error discarding workout:', error);
@@ -238,14 +279,139 @@ export default function SaveWorkoutScreen() {
         </View>
 
         {/* Visibility */}
-        <Pressable className={`px-4 py-4 flex-row items-center justify-between border-t ${isDark ? 'border-border-dark' : 'border-border'}`}>
-          <Text className={`text-base ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-            Visibility
-          </Text>
-          <Text className={`text-base ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-            {visibility} →
-          </Text>
+        <Pressable 
+          className={`px-4 py-4 flex-row items-center justify-between border-t ${isDark ? 'border-border-dark' : 'border-border'}`}
+          onPress={() => setVisibilityModal(true)}
+        >
+          <View className="flex-row items-center">
+            {visibility === 'Private' ? (
+              <Lock size={20} color={isDark ? '#F5F5F5' : '#11181C'} style={{ marginRight: 8 }} />
+            ) : (
+              <Users size={20} color={isDark ? '#F5F5F5' : '#11181C'} style={{ marginRight: 8 }} />
+            )}
+            <Text className={`text-base ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              Visibility
+            </Text>
+          </View>
+          <View className="flex-row items-center">
+            <Text className={`text-base mr-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              {visibility}
+            </Text>
+            <Text className={`text-base ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+              →
+            </Text>
+          </View>
         </Pressable>
+
+        {/* Visibility Modal */}
+        <Modal
+          visible={visibilityModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setVisibilityModal(false)}
+        >
+          <View className="flex-1 justify-end bg-black/50">
+            <Pressable 
+              className="flex-1"
+              onPress={() => setVisibilityModal(false)}
+            />
+            <View className={`${isDark ? 'bg-card-dark' : 'bg-card'} rounded-t-3xl p-6 pb-8`}>
+              {/* Drag Handle */}
+              <View className="items-center mb-4">
+                <View className={`w-12 h-1 rounded-full ${isDark ? 'bg-muted-foreground-dark' : 'bg-muted-foreground'}`} />
+              </View>
+
+              {/* Header */}
+              <Text className={`text-xl font-bold mb-6 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Visibility
+              </Text>
+
+              {/* Everyone Option */}
+              <Pressable
+                className={`flex-row items-center py-4 px-4 mb-2 rounded-lg ${
+                  visibility === 'Everyone' 
+                    ? (isDark ? 'bg-primary-dark' : 'bg-primary') 
+                    : (isDark ? 'bg-muted-dark' : 'bg-muted')
+                }`}
+                onPress={() => {
+                  setVisibility('Everyone');
+                  setVisibilityModal(false);
+                }}
+              >
+                <Users 
+                  size={24} 
+                  color={visibility === 'Everyone' 
+                    ? '#FFFFFF' 
+                    : (isDark ? '#F5F5F5' : '#11181C')
+                  } 
+                />
+                <View className="ml-4 flex-1">
+                  <Text className={`text-base font-semibold ${
+                    visibility === 'Everyone' 
+                      ? 'text-white' 
+                      : (isDark ? 'text-foreground-dark' : 'text-foreground')
+                  }`}>
+                    Everyone
+                  </Text>
+                  <Text className={`text-sm mt-1 ${
+                    visibility === 'Everyone' 
+                      ? 'text-white/80' 
+                      : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')
+                  }`}>
+                    Anyone can see this workout
+                  </Text>
+                </View>
+                {visibility === 'Everyone' && (
+                  <View className="w-6 h-6 rounded-full bg-white items-center justify-center">
+                    <View className="w-3 h-3 rounded-full bg-primary" />
+                  </View>
+                )}
+              </Pressable>
+
+              {/* Private Option */}
+              <Pressable
+                className={`flex-row items-center py-4 px-4 rounded-lg ${
+                  visibility === 'Private' 
+                    ? (isDark ? 'bg-primary-dark' : 'bg-primary') 
+                    : (isDark ? 'bg-muted-dark' : 'bg-muted')
+                }`}
+                onPress={() => {
+                  setVisibility('Private');
+                  setVisibilityModal(false);
+                }}
+              >
+                <Lock 
+                  size={24} 
+                  color={visibility === 'Private' 
+                    ? '#FFFFFF' 
+                    : (isDark ? '#F5F5F5' : '#11181C')
+                  } 
+                />
+                <View className="ml-4 flex-1">
+                  <Text className={`text-base font-semibold ${
+                    visibility === 'Private' 
+                      ? 'text-white' 
+                      : (isDark ? 'text-foreground-dark' : 'text-foreground')
+                  }`}>
+                    Private
+                  </Text>
+                  <Text className={`text-sm mt-1 ${
+                    visibility === 'Private' 
+                      ? 'text-white/80' 
+                      : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')
+                  }`}>
+                    Only you can see this workout
+                  </Text>
+                </View>
+                {visibility === 'Private' && (
+                  <View className="w-6 h-6 rounded-full bg-white items-center justify-center">
+                    <View className="w-3 h-3 rounded-full bg-primary" />
+                  </View>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
 
         {/* Discard Workout */}
         <Pressable 

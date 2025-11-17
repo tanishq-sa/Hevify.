@@ -1,5 +1,5 @@
 import { db } from '@/config/firebase';
-import { doc, getDoc, increment, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, increment, setDoc, updateDoc } from 'firebase/firestore';
 
 /**
  * Initialize user document in Firestore
@@ -146,6 +146,7 @@ export const getUserStats = async (userId: string) => {
 
 /**
  * Initialize current workout document
+ * Matches the schema: workouts/current_{userId}
  */
 export const initializeCurrentWorkout = async (userId: string) => {
   try {
@@ -159,9 +160,47 @@ export const initializeCurrentWorkout = async (userId: string) => {
         userId,
         updatedAt: new Date().toISOString(),
       });
+      console.log('Current workout document initialized');
     }
   } catch (error) {
     console.error('Error initializing current workout:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete the current workout document if it exists (legacy support)
+ */
+export const deleteCurrentWorkoutDocument = async (userId: string) => {
+  try {
+    const workoutRef = doc(db, 'workouts', `current_${userId}`);
+    await deleteDoc(workoutRef);
+  } catch (error: any) {
+    if (error?.code !== 'not-found') {
+      console.warn('Unable to delete current workout document:', error);
+    }
+  }
+};
+
+/**
+ * Get user document with all fields
+ * Returns null if user doesn't exist
+ */
+export const getUserDocument = async (userId: string) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userRef);
+
+    if (userDoc.exists()) {
+      return {
+        id: userDoc.id,
+        ...userDoc.data(),
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting user document:', error);
+    return null;
   }
 };
 
