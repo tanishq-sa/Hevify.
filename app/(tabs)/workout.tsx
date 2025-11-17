@@ -1,7 +1,9 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { clearWorkoutData, hasWorkoutInProgress } from '@/utils/workout-storage';
 import { useRouter } from 'expo-router';
 import { NotepadText, PlusIcon } from 'lucide-react-native';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../../global.css';
 
@@ -9,6 +11,40 @@ export default function TabTwoScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const router = useRouter();
+  const [showWorkoutModal, setShowWorkoutModal] = useState(false);
+  const [hasWorkout, setHasWorkout] = useState(false);
+
+  useEffect(() => {
+    const checkWorkout = async () => {
+      const inProgress = await hasWorkoutInProgress();
+      setHasWorkout(inProgress);
+    };
+    checkWorkout();
+  }, []);
+
+  const handleStartWorkout = async () => {
+    const inProgress = await hasWorkoutInProgress();
+    if (inProgress) {
+      setShowWorkoutModal(true);
+    } else {
+      router.push('/log-workout' as any);
+    }
+  };
+
+  const handleResumeWorkout = () => {
+    setShowWorkoutModal(false);
+    router.push('/log-workout' as any);
+  };
+
+  const handleStartNewWorkout = async () => {
+    await clearWorkoutData();
+    setShowWorkoutModal(false);
+    router.push('/log-workout' as any);
+  };
+
+  const handleCancel = () => {
+    setShowWorkoutModal(false);
+  };
 
   const routines = [
     {
@@ -41,7 +77,7 @@ export default function TabTwoScreen() {
           </Text>
           <Pressable 
             className={`${isDark ? 'bg-card-dark' : 'bg-card'} rounded-lg p-4 flex-row items-center`}
-            onPress={() => router.push('/log-workout')}
+            onPress={handleStartWorkout}
           >
             <View className={`w-8 h-8 rounded-full ${isDark ? 'bg-muted-dark' : 'bg-muted'} items-center justify-center mr-3`}>
               <PlusIcon 
@@ -107,6 +143,53 @@ export default function TabTwoScreen() {
           ))}
         </View>
       </ScrollView>
+
+      {/* Workout in Progress Modal */}
+      <Modal
+        visible={showWorkoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancel}
+      >
+        <View className="flex-1 items-center justify-center bg-black/50">
+          <View className={`mx-4 rounded-2xl p-6 w-11/12 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
+            <Text className={`text-xl font-bold mb-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              You have a workout in progress
+            </Text>
+            <Text className={`text-base mb-6 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+              If you start a new workout, your old workout will be permanently deleted.
+            </Text>
+
+            <Pressable
+              className={`py-4 rounded-lg mb-3 ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}
+              onPress={handleResumeWorkout}
+            >
+              <Text className={`text-center font-semibold ${isDark ? 'text-primary-foreground-dark' : 'text-primary-foreground'}`}>
+                Resume workout in progress
+              </Text>
+            </Pressable>
+
+            <Pressable
+              className={`py-4 rounded-lg bg-destructive`}
+              onPress={handleStartNewWorkout}
+            >
+              <Text className={`text-center font-semibold ${isDark ? 'text-foreground' : 'text-foreground-dark'}`}>
+                Start new workout
+              </Text>
+            </Pressable>
+
+            {/* Cancel Button */}
+            <Pressable
+              className={`py-4 rounded-lg ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+              onPress={handleCancel}
+            >
+              <Text className={`text-center font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
