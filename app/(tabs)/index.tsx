@@ -1,4 +1,6 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Bell,
   ChevronDown,
@@ -174,22 +176,105 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const router = useRouter();
   const [selectedFeed, setSelectedFeed] = useState<FeedType>('Home');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [displayedWorkouts, setDisplayedWorkouts] = useState(mockWorkouts);
+  const [completedWorkouts, setCompletedWorkouts] = useState<any[]>([]);
+
+  // Load completed workouts from storage
+  useFocusEffect(
+    React.useCallback(() => {
+      loadCompletedWorkouts();
+    }, [])
+  );
+
+  const loadCompletedWorkouts = async () => {
+    try {
+      const data = await AsyncStorage.getItem('@completed_workouts');
+      if (data) {
+        const workouts = JSON.parse(data);
+        setCompletedWorkouts(workouts);
+        
+        // Convert completed workouts to feed format and merge with mock data
+        const formattedWorkouts = workouts.map((workout: any) => ({
+          id: workout.id,
+          username: 'dazzelr',
+          avatar: 'https://i.pravatar.cc/150?img=12',
+          timeAgo: formatTimeAgo(workout.date),
+          isPrivate: workout.visibility === 'Only me',
+          title: workout.title,
+          stats: {
+            time: formatDuration(workout.duration),
+            volume: `${workout.volume} kg`,
+            records: 0
+          },
+          exercises: workout.exercises.slice(0, 3).map((ex: any) => ({
+            name: ex.name,
+            sets: ex.sets.filter((s: any) => s.completed).length,
+            icon: '🏋️'
+          })),
+          totalExercises: workout.exercises.length,
+          likes: 0,
+          comments: 0,
+          shares: 0
+        }));
+        
+        // Merge with mock workouts
+        setDisplayedWorkouts([...formattedWorkouts, ...mockWorkouts]);
+      }
+    } catch (error) {
+      console.error('Error loading completed workouts:', error);
+    }
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMs = now.getTime() - date.getTime();
+    const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInMinutes < 60) {
+      return `${diffInMinutes} minutes ago`;
+    } else if (diffInHours < 24) {
+      return `${diffInHours} hours ago`;
+    } else if (diffInDays === 1) {
+      return 'Yesterday';
+    } else {
+      return `${diffInDays} days ago`;
+    }
+  };
+
+  const formatDuration = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}min`;
+    }
+    return `${minutes}min`;
+  };
 
   // Randomize feed when "Discover" is selected
   useEffect(() => {
     if (selectedFeed === 'Discover') {
-      setDisplayedWorkouts(shuffleArray(mockWorkouts));
+      setDisplayedWorkouts(shuffleArray([...completedWorkouts, ...mockWorkouts]));
     } else {
-      setDisplayedWorkouts(mockWorkouts);
+      loadCompletedWorkouts();
     }
   }, [selectedFeed]);
 
   const renderWorkoutCard = ({ item }: { item: typeof mockWorkouts[0] }) => (
-    <View 
+    <Pressable 
       className={`mb-4 mx-4 p-4 rounded-2xl ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+      onPress={() => {
+        // Only navigate if it's a saved workout (has valid id)
+        if (item.id) {
+          router.push(`/workout-detail?id=${item.id}`);
+        }
+      }}
     >
       {/* User Header */}
       <View className="flex-row items-center mb-3">
@@ -292,7 +377,7 @@ export default function HomeScreen() {
           </Text>
         </Pressable>
       </View>
-    </View>
+    </Pressable>
   );
 
   const renderSuggestedAthlete = ({ item }: { item: typeof suggestedAthletes[0] }) => (

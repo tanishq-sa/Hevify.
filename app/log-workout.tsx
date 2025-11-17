@@ -545,6 +545,11 @@ export default function LogWorkoutScreen() {
             style={{
               backgroundColor: '#3B82F6',
             }}
+            onPress={async () => {
+              // Save current workout data before navigating
+              await saveWorkoutData(exercises, duration);
+              router.push('/save-workout');
+            }}
           >
             <Text className="font-semibold text-white text-base">
               Finish
