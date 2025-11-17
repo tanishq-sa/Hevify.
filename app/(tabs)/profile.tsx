@@ -1,14 +1,17 @@
+import { auth, db } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { getUserStats } from '@/utils/firestore-init';
+import { useRouter } from 'expo-router';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { LogOut, Settings, UserRound } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    Image,
-    Pressable,
-    ScrollView,
-    Text,
-    View
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../../global.css';
@@ -18,33 +21,58 @@ export default function ProfileScreen() {
   const isDark = colorScheme === 'dark';
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [userData, setUserData] = useState<any>(null);
+  const [userStats, setUserStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      loadUser();
-    }, [])
-  );
-
-  const loadUser = async () => {
-    try {
-      const userData = await AsyncStorage.getItem('@current_user');
-      if (userData) {
-        setUser(JSON.parse(userData));
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        // Load user data from Firestore
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setUserData(data);
+            // Load stats separately
+            const stats = await getUserStats(firebaseUser.uid);
+            setUserStats(stats);
+          }
+        } catch (error) {
+          console.error('Error loading user data:', error);
+        }
+      } else {
+        setUser(null);
+        setUserData(null);
       }
-    } catch (error) {
-      console.error('Error loading user:', error);
-    }
-  };
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleLogout = async () => {
     try {
-      await AsyncStorage.removeItem('@current_user');
-      setUser(null);
+      await signOut(auth);
       router.replace('/login');
     } catch (error) {
       console.error('Error logging out:', error);
     }
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView 
+        className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`} 
+        edges={['top', 'left', 'right']}
+      >
+        <View className="flex-1 items-center justify-center">
+          <Text className={isDark ? 'text-foreground-dark' : 'text-foreground'}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!user) {
     return (
@@ -119,7 +147,7 @@ export default function ProfileScreen() {
             />
             <View className="flex-1">
               <Text className={`text-xl font-bold mb-1 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                {user.username}
+                {userData?.username || user.email?.split('@')[0] || 'User'}
               </Text>
               <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
                 {user.email}
@@ -140,7 +168,7 @@ export default function ProfileScreen() {
                   Total Workouts
                 </Text>
                 <Text className={`text-2xl font-bold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  0
+                  {userStats?.totalWorkouts || 0}
                 </Text>
               </View>
               <View className="flex-1">
@@ -148,7 +176,7 @@ export default function ProfileScreen() {
                   Total Volume
                 </Text>
                 <Text className={`text-2xl font-bold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  0 kg
+                  {userStats?.totalVolume ? `${userStats.totalVolume.toLocaleString()} kg` : '0 kg'}
                 </Text>
               </View>
             </View>
@@ -158,7 +186,7 @@ export default function ProfileScreen() {
                   Total Sets
                 </Text>
                 <Text className={`text-2xl font-bold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  0
+                  {userStats?.totalSets || 0}
                 </Text>
               </View>
               <View className="flex-1">
@@ -166,7 +194,7 @@ export default function ProfileScreen() {
                   Records
                 </Text>
                 <Text className={`text-2xl font-bold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  0
+                  {userStats?.records || 0}
                 </Text>
               </View>
             </View>

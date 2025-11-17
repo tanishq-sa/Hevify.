@@ -1,5 +1,8 @@
+import { auth } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { initializeUserDocument } from '@/utils/firestore-init';
 import { useRouter } from 'expo-router';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { ChevronLeft } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
@@ -10,7 +13,6 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import '../global.css';
 
 export default function SignupScreen() {
@@ -23,6 +25,20 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleBack = () => {
+    // Try to go back, if it fails, navigate to login
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/login');
+      }
+    } catch {
+      router.replace('/login');
+    }
+  };
 
   const handleSignup = async () => {
     if (!username || !email || !password || !confirmPassword) {
@@ -40,40 +56,34 @@ export default function SignupScreen() {
       return;
     }
 
-    try {
-      // Check if user already exists
-      const usersData = await AsyncStorage.getItem('@users');
-      const users = usersData ? JSON.parse(usersData) : [];
-      
-      const existingUser = users.find((u: any) => u.email === email || u.username === username);
-      
-      if (existingUser) {
-        setError('Email or username already exists');
-        return;
-      }
+    setLoading(true);
+    setError('');
 
-      // Create new user
-      const newUser = {
-        id: Date.now().toString(),
+    try {
+      // Create auth user
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Initialize user document in Firestore
+      await initializeUserDocument(user.uid, {
         username,
         email,
-        password, // In production, this should be hashed
-      };
-
-      users.push(newUser);
-      await AsyncStorage.setItem('@users', JSON.stringify(users));
-
-      // Save current user session
-      await AsyncStorage.setItem('@current_user', JSON.stringify({
-        id: newUser.id,
-        email: newUser.email,
-        username: newUser.username,
-      }));
+      });
 
       router.replace('/(tabs)');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error signing up:', error);
-      setError('An error occurred. Please try again.');
+      if (error.code === 'auth/email-already-in-use') {
+        setError('Email is already registered');
+      } else if (error.code === 'auth/invalid-email') {
+        setError('Invalid email address');
+      } else if (error.code === 'auth/weak-password') {
+        setError('Password is too weak');
+      } else {
+        setError('An error occurred. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -81,7 +91,7 @@ export default function SignupScreen() {
     <SafeAreaView className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
       {/* Header */}
       <View className={`flex-row items-center justify-between px-4 py-3 border-b ${isDark ? 'border-border-dark' : 'border-border'}`}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={handleBack}>
           <ChevronLeft size={24} color={isDark ? '#F5F5F5' : '#11181C'} />
         </Pressable>
         <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
@@ -189,11 +199,12 @@ export default function SignupScreen() {
           {/* Sign Up Button */}
           <Pressable
             className="py-4 rounded-xl items-center mb-4"
-            style={{ backgroundColor: '#3B82F6' }}
+            style={{ backgroundColor: loading ? '#9CA3AF' : '#3B82F6' }}
             onPress={handleSignup}
+            disabled={loading}
           >
             <Text className="text-base font-semibold text-white">
-              Sign Up
+              {loading ? 'Creating account...' : 'Sign Up'}
             </Text>
           </Pressable>
 
@@ -202,7 +213,7 @@ export default function SignupScreen() {
             <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
               Already have an account?{' '}
             </Text>
-            <Pressable onPress={() => router.push('/login')}>
+            <Pressable onPress={() => router.replace('/login')}>
               <Text className="text-sm font-semibold" style={{ color: '#3B82F6' }}>
                 Login
               </Text>

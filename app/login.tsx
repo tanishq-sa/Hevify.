@@ -1,6 +1,7 @@
+import { auth } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import { ChevronLeft } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
@@ -21,6 +22,20 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleBack = () => {
+    // Try to go back, if it fails, navigate to signup
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/signup');
+      }
+    } catch {
+      router.replace('/signup');
+    }
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -28,28 +43,25 @@ export default function LoginScreen() {
       return;
     }
 
+    setLoading(true);
+    setError('');
+
     try {
-      // Check if user exists
-      const usersData = await AsyncStorage.getItem('@users');
-      const users = usersData ? JSON.parse(usersData) : [];
-      
-      const user = users.find((u: any) => u.email === email && u.password === password);
-      
-      if (user) {
-        // Save current user session
-        await AsyncStorage.setItem('@current_user', JSON.stringify({
-          id: user.id,
-          email: user.email,
-          username: user.username,
-        }));
-        
-        router.replace('/(tabs)');
-      } else {
-        setError('Invalid email or password');
-      }
-    } catch (error) {
+      await signInWithEmailAndPassword(auth, email, password);
+      router.replace('/(tabs)');
+    } catch (error: any) {
       console.error('Error logging in:', error);
-      setError('An error occurred. Please try again.');
+      if (error.code === 'auth/invalid-email') {
+        setError('Invalid email address');
+      } else if (error.code === 'auth/user-not-found') {
+        setError('No account found with this email');
+      } else if (error.code === 'auth/wrong-password') {
+        setError('Incorrect password');
+      } else {
+        setError('An error occurred. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -57,7 +69,7 @@ export default function LoginScreen() {
     <SafeAreaView className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
       {/* Header */}
       <View className={`flex-row items-center justify-between px-4 py-3 border-b ${isDark ? 'border-border-dark' : 'border-border'}`}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={handleBack}>
           <ChevronLeft size={24} color={isDark ? '#F5F5F5' : '#11181C'} />
         </Pressable>
         <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
@@ -126,11 +138,12 @@ export default function LoginScreen() {
           {/* Login Button */}
           <Pressable
             className="py-4 rounded-xl items-center mb-4"
-            style={{ backgroundColor: '#3B82F6' }}
+            style={{ backgroundColor: loading ? '#9CA3AF' : '#3B82F6' }}
             onPress={handleLogin}
+            disabled={loading}
           >
             <Text className="text-base font-semibold text-white">
-              Login
+              {loading ? 'Logging in...' : 'Login'}
             </Text>
           </Pressable>
 
@@ -139,7 +152,7 @@ export default function LoginScreen() {
             <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
               Don't have an account?{' '}
             </Text>
-            <Pressable onPress={() => router.push('/signup')}>
+            <Pressable onPress={() => router.replace('/signup')}>
               <Text className="text-sm font-semibold" style={{ color: '#3B82F6' }}>
                 Sign up
               </Text>

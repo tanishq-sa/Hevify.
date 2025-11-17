@@ -1,5 +1,5 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getWorkoutById } from '@/utils/workout-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronLeft, Lock, MessageCircle, MoreVertical, Share2, ThumbsUp } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
@@ -27,10 +27,8 @@ export default function WorkoutDetailScreen() {
   const loadWorkout = async () => {
     try {
       const workoutId = params.id as string;
-      const data = await AsyncStorage.getItem('@completed_workouts');
-      if (data) {
-        const workouts = JSON.parse(data);
-        const foundWorkout = workouts.find((w: any) => w.id === workoutId);
+      if (workoutId) {
+        const foundWorkout = await getWorkoutById(workoutId);
         if (foundWorkout) {
           setWorkout(foundWorkout);
         }
@@ -51,6 +49,7 @@ export default function WorkoutDetailScreen() {
   };
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return '';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { 
       weekday: 'long',
@@ -146,7 +145,7 @@ export default function WorkoutDetailScreen() {
               </Text>
               <View className="flex-row items-center">
                 <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                  {formatDate(workout.date)}
+                  {formatDate(workout.createdAt || workout.date)}
                 </Text>
                 {workout.visibility === 'Only me' && (
                   <>

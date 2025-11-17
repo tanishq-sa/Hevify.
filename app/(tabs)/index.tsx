@@ -1,5 +1,6 @@
+import { auth } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCompletedWorkouts } from '@/utils/workout-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Bell,
@@ -191,40 +192,42 @@ export default function HomeScreen() {
 
   const loadCompletedWorkouts = async () => {
     try {
-      const data = await AsyncStorage.getItem('@completed_workouts');
-      if (data) {
-        const workouts = JSON.parse(data);
-        setCompletedWorkouts(workouts);
-        
-        // Convert completed workouts to feed format and merge with mock data
-        const formattedWorkouts = workouts.map((workout: any) => ({
-          id: workout.id,
-          username: 'dazzelr',
-          avatar: 'https://i.pravatar.cc/150?img=12',
-          timeAgo: formatTimeAgo(workout.date),
-          isPrivate: workout.visibility === 'Only me',
-          title: workout.title,
-          stats: {
-            time: formatDuration(workout.duration),
-            volume: `${workout.volume} kg`,
-            records: 0
-          },
-          exercises: workout.exercises.slice(0, 3).map((ex: any) => ({
-            name: ex.name,
-            sets: ex.sets.filter((s: any) => s.completed).length,
-            icon: '🏋️'
-          })),
-          totalExercises: workout.exercises.length,
-          likes: 0,
-          comments: 0,
-          shares: 0
-        }));
-        
-        // Merge with mock workouts
-        setDisplayedWorkouts([...formattedWorkouts, ...mockWorkouts]);
+      if (!auth.currentUser) {
+        setDisplayedWorkouts([]);
+        return;
       }
+
+      const workouts = await getCompletedWorkouts(50);
+      setCompletedWorkouts(workouts);
+      
+      // Convert completed workouts to feed format
+      const formattedWorkouts = workouts.map((workout: any) => ({
+        id: workout.id,
+        username: auth.currentUser?.email?.split('@')[0] || 'User',
+        avatar: 'https://i.pravatar.cc/150?img=12',
+        timeAgo: formatTimeAgo(workout.createdAt || workout.date),
+        isPrivate: workout.visibility === 'Only me',
+        title: workout.title,
+        stats: {
+          time: formatDuration(workout.duration),
+          volume: `${workout.volume || 0} kg`,
+          records: 0
+        },
+        exercises: (workout.exercises || []).slice(0, 3).map((ex: any) => ({
+          name: ex.name,
+          sets: (ex.sets || []).filter((s: any) => s.completed).length,
+          icon: '🏋️'
+        })),
+        totalExercises: (workout.exercises || []).length,
+        likes: 0,
+        comments: 0,
+        shares: 0
+      }));
+      
+      setDisplayedWorkouts(formattedWorkouts);
     } catch (error) {
       console.error('Error loading completed workouts:', error);
+      setDisplayedWorkouts([]);
     }
   };
 
@@ -259,11 +262,7 @@ export default function HomeScreen() {
 
   // Randomize feed when "Discover" is selected
   useEffect(() => {
-    if (selectedFeed === 'Discover') {
-      setDisplayedWorkouts(shuffleArray([...completedWorkouts, ...mockWorkouts]));
-    } else {
-      loadCompletedWorkouts();
-    }
+    loadCompletedWorkouts();
   }, [selectedFeed]);
 
   const renderWorkoutCard = ({ item }: { item: typeof mockWorkouts[0] }) => (

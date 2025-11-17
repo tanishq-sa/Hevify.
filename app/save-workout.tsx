@@ -1,6 +1,7 @@
+import { auth } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { clearWorkoutData as clearWorkout, loadWorkoutData as loadWorkout } from '@/utils/workout-storage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { updateUserStats } from '@/utils/firestore-init';
+import { clearWorkoutData as clearWorkout, loadWorkoutData as loadWorkout, saveCompletedWorkout } from '@/utils/workout-storage';
 import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import React, { useState } from 'react';
@@ -78,10 +79,8 @@ export default function SaveWorkoutScreen() {
     try {
       // Create workout summary
       const workoutSummary = {
-        id: Date.now().toString(),
         title: workoutTitle || 'Workout title',
         description: description || '',
-        date: new Date().toISOString(),
         duration: workoutData?.duration || 0,
         exercises: workoutData?.exercises || [],
         volume: calculateTotalVolume(workoutData?.exercises || []),
@@ -89,11 +88,16 @@ export default function SaveWorkoutScreen() {
         visibility,
       };
 
-      // Save to completed workouts
-      const existingWorkouts = await AsyncStorage.getItem('@completed_workouts');
-      const workouts = existingWorkouts ? JSON.parse(existingWorkouts) : [];
-      workouts.unshift(workoutSummary); // Add to beginning
-      await AsyncStorage.setItem('@completed_workouts', JSON.stringify(workouts));
+      // Save to Firestore
+      await saveCompletedWorkout(workoutSummary);
+
+      // Update user stats
+      if (auth.currentUser) {
+        await updateUserStats(auth.currentUser.uid, {
+          volume: workoutSummary.volume,
+          sets: workoutSummary.sets,
+        });
+      }
 
       // Clear current workout data
       await clearWorkout();
