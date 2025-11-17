@@ -164,7 +164,7 @@ export default function TabTwoScreen() {
               className={`py-4 rounded-lg mb-3 ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}
               onPress={handleResumeWorkout}
             >
-              <Text className={`text-center font-semibold ${isDark ? 'text-primary-foreground-dark' : 'text-primary-foreground'}`}>
+              <Text className={`text-center font-semibold text-white`}>
                 Resume workout in progress
               </Text>
             </Pressable>
@@ -173,7 +173,7 @@ export default function TabTwoScreen() {
               className={`py-4 rounded-lg bg-destructive`}
               onPress={handleStartNewWorkout}
             >
-              <Text className={`text-center font-semibold ${isDark ? 'text-foreground' : 'text-foreground-dark'}`}>
+              <Text className={`text-center font-semibold text-white`}>
                 Start new workout
               </Text>
             </Pressable>

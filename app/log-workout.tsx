@@ -8,13 +8,14 @@ import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../global.css';
 
-type ExerciseSet = {
-  id: string;
-  weight: number;
-  reps: number;
-  rpe: number | null;
-  completed: boolean;
-};
+  type ExerciseSet = {
+    id: string;
+    weight: number;
+    reps: number;
+    rpe: number | null;
+    completed: boolean;
+    setType?: 'W' | '1' | 'F' | 'D'; // W=Warm Up, 1=Normal, F=Failure, D=Drop Set
+  };
 
 type WorkoutExercise = {
   id: string;
@@ -40,6 +41,11 @@ export default function LogWorkoutScreen() {
     exerciseId: null,
     setId: null,
   });
+  const [setTypeModal, setSetTypeModal] = useState<{ isOpen: boolean; exerciseId: string | null; setId: string | null }>({
+    isOpen: false,
+    exerciseId: null,
+    setId: null,
+  });
   const [muscleDistributionModal, setMuscleDistributionModal] = useState(false);
   const isModalOpeningRef = useRef(false);
   const isActionInProgressRef = useRef(false);
@@ -48,7 +54,14 @@ export default function LogWorkoutScreen() {
     const loadData = async () => {
       const { exercises: savedExercises, duration: savedDuration } = await loadWorkoutData();
       if (savedExercises.length > 0) {
-        setExercises(savedExercises);
+        const migratedExercises = savedExercises.map(ex => ({
+          ...ex,
+          sets: ex.sets.map((set: ExerciseSet) => ({
+            ...set,
+            setType: set.setType || '1',
+          })),
+        }));
+        setExercises(migratedExercises);
         setDuration(savedDuration);
         timerStartTimeRef.current = Date.now() - (savedDuration * 1000);
       }
@@ -74,11 +87,11 @@ export default function LogWorkoutScreen() {
             reps: 0,
             rpe: null,
             completed: false,
+            setType: '1',
           }],
         }));
         setExercises(prev => {
           const toAdd = workoutExercises.map((e: WorkoutExercise) => {
-            // If exercise already exists, create a new unique ID for the duplicate
             const existingIds = prev.map(ex => ex.id);
             if (existingIds.includes(e.id)) {
               return {
@@ -113,14 +126,12 @@ export default function LogWorkoutScreen() {
     return `${seconds}s`;
   };
 
-  // Start timer when component mounts
   useEffect(() => {
     if (!isLoaded) return;
     
     const interval = setInterval(() => {
       setDuration((prev) => {
         const newDuration = prev + 1;
-        // Save duration every 5 seconds
         if (newDuration % 5 === 0) {
           saveWorkoutData(exercises, newDuration);
         }
@@ -147,6 +158,7 @@ export default function LogWorkoutScreen() {
             reps: 0,
             rpe: null,
             completed: false,
+            setType: '1',
           };
           return { ...ex, sets: [...ex.sets, newSet] };
         }
@@ -212,7 +224,6 @@ export default function LogWorkoutScreen() {
 
   const API_BASE_URL = 'https://musclegroup-image-generator-main-production.up.railway.app';
 
-  // Map muscle names to API format
   const mapMuscleToAPI = (muscle: string): string => {
     const muscleMap: { [key: string]: string } = {
       'Lats': 'latissimus',
@@ -266,6 +277,45 @@ export default function LogWorkoutScreen() {
   };
 
   const muscleDistribution = calculateMuscleDistribution();
+
+  const handleSetTypeSelect = (setType: 'W' | '1' | 'F' | 'D' | 'X') => {
+    if (setTypeModal.exerciseId && setTypeModal.setId) {
+      if (setType === 'X') {
+        // Remove set
+        setExercises(prev => {
+          const updated = prev.map(ex => {
+            if (ex.id === setTypeModal.exerciseId) {
+              const filteredSets = ex.sets.filter(set => set.id !== setTypeModal.setId);
+              // Ensure at least one set remains
+              if (filteredSets.length === 0) {
+                return ex;
+              }
+              return { ...ex, sets: filteredSets };
+            }
+            return ex;
+          });
+          saveWorkoutData(updated, duration);
+          return updated;
+        });
+      } else {
+        // Update set type
+        updateSet(setTypeModal.exerciseId, setTypeModal.setId, 'setType', setType);
+      }
+      setSetTypeModal({ isOpen: false, exerciseId: null, setId: null });
+    }
+  };
+
+  const getSetTypeInfo = (setType?: 'W' | '1' | 'F' | 'D' | 'X') => {
+    const defaultType = setType || '1';
+    const types = {
+      'W': { label: 'Warm Up Set', color: '#FF9500', icon: 'W', bgColor: '#FF9500' },
+      '1': { label: 'Normal Set', color: '#FFFFFF', icon: '1', bgColor: '#FFFFFF' },
+      'F': { label: 'Failure Set', color: '#FF3B30', icon: 'F', bgColor: '#FF3B30' },
+      'D': { label: 'Drop Set', color: '#007AFF', icon: 'D', bgColor: '#007AFF' },
+      'X': { label: 'Remove Set', color: '#FF3B30', icon: 'X', bgColor: '#FF3B30' },
+    };
+    return types[defaultType];
+  };
   
   const getAllMuscles = () => {
     const primaryMuscles: string[] = [];
@@ -274,7 +324,6 @@ export default function LogWorkoutScreen() {
     exercises.forEach(exercise => {
       const hasCompletedSets = exercise.sets.some(set => set.completed);
       
-      // Only include muscles from exercises with completed sets
       if (hasCompletedSets) {
         if (exercise.primaryMuscle && !primaryMuscles.includes(exercise.primaryMuscle)) {
           primaryMuscles.push(exercise.primaryMuscle);
@@ -300,7 +349,9 @@ export default function LogWorkoutScreen() {
 
   const totalSets = exercises.reduce((sum, ex) => sum + ex.sets.filter(set => set.completed).length, 0);
   const totalVolume = exercises.reduce((sum, ex) => 
-    sum + ex.sets.reduce((setSum, set) => setSum + (set.weight * set.reps), 0), 0
+    sum + ex.sets
+      .filter(set => set.completed)
+      .reduce((setSum, set) => setSum + (set.weight * set.reps), 0), 0
   );
 
   return (
@@ -446,11 +497,23 @@ export default function LogWorkoutScreen() {
                 <View className={`w-12 h-12 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
                   <Dumbbell size={24} color={isDark ? '#9BA1A6' : '#687076'} />
                 </View>
-                <View className="flex-1">
+                <Pressable 
+                  className="flex-1"
+                  onPress={() => {
+                    router.push({
+                      pathname: '/exercise-detail',
+                      params: {
+                        name: exercise.name,
+                        primaryMuscle: exercise.primaryMuscle,
+                        secondaryMuscles: exercise.secondaryMuscles?.join(',') || '',
+                      },
+                    } as any);
+                  }}
+                >
                   <Text className={`text-base font-semibold ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
                     {exercise.name}
                   </Text>
-                </View>
+                </Pressable>
                 <Pressable>
                   <MoreVertical size={20} color={isDark ? '#9BA1A6' : '#687076'} />
                 </Pressable>
@@ -513,14 +576,59 @@ export default function LogWorkoutScreen() {
                 </View>
 
                 {exercise.sets.map((set, index) => (
-                  <View key={set.id} className="flex-row items-center px-3 py-3">
-                    <View className="w-10 items-center">
-                      <Text className={`text-sm text-center ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                        {index + 1}
-                      </Text>
-                    </View>
+                  <View 
+                    key={set.id} 
+                    className={`flex-row items-center px-3 py-3 w-full ${
+                      set.completed 
+                        ? '' 
+                        : (index % 2 === 1 ? (isDark ? 'bg-card-dark' : 'bg-secondary') : '')
+                    }`}
+                    style={set.completed ? {
+                      backgroundColor: 'rgba(70, 200, 80, 0.8)', // green-500 with 80% opacity
+                    } : {}}
+                  >
+                    <Pressable 
+                      className="w-10 items-center justify-center"
+                      onPress={() => {
+                        if (!setTypeModal.isOpen && !isActionInProgressRef.current) {
+                          isActionInProgressRef.current = true;
+                          setSetTypeModal({ isOpen: true, exerciseId: exercise.id, setId: set.id });
+                        }
+                      }}
+                    >
+                      {(() => {
+                        const setTypeInfo = getSetTypeInfo(set.setType);
+                        const setType = set.setType || '1';
+                        const isNormal = setType === '1';
+                        const isWarmUp = setType === 'W';
+                        const isFailure = setType === 'F';
+                        const isDropSet = setType === 'D';
+                        
+                        const displayText = isNormal ? (index + 1).toString() : setTypeInfo.icon;
+                        
+                        let iconColor = set.completed ? '#FFFFFF' : (isDark ? '#F5F5F5' : '#11181C');
+                        if (!set.completed) {
+                          if (isWarmUp) iconColor = '#FF9500';
+                          else if (isFailure) iconColor = '#FF3B30';
+                          else if (isDropSet) iconColor = '#007AFF';
+                        }
+                        
+                        return (
+                          <View 
+                            className="w-7 h-7 rounded items-center justify-center"
+                          >
+                            <Text 
+                              className="text-xs font-bold"
+                              style={{ color: iconColor }}
+                            >
+                              {displayText}
+                            </Text>
+                          </View>
+                        );
+                      })()}
+                    </Pressable>
                     <View className="flex-1 items-center">
-                      <Text className={`text-sm text-center ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                      <Text className={`text-sm text-center ${set.completed ? 'text-white' : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')}`}>
                         -
                       </Text>
                     </View>
@@ -532,9 +640,11 @@ export default function LogWorkoutScreen() {
                         keyboardType="numeric"
                         style={{ 
                           width: '100%',
-                          color: set.weight === 0 
-                            ? (isDark ? '#9BA1A6' : '#687076')
-                            : (isDark ? '#F5F5F5' : '#11181C')
+                          color: set.completed 
+                            ? '#FFFFFF'
+                            : (set.weight === 0 
+                              ? (isDark ? '#9BA1A6' : '#687076')
+                              : (isDark ? '#F5F5F5' : '#11181C'))
                         }}
                       />
                     </View>
@@ -546,15 +656,17 @@ export default function LogWorkoutScreen() {
                         keyboardType="numeric"
                         style={{ 
                           width: '100%',
-                          color: set.reps === 0 
-                            ? (isDark ? '#9BA1A6' : '#687076')
-                            : (isDark ? '#F5F5F5' : '#11181C')
+                          color: set.completed 
+                            ? '#FFFFFF'
+                            : (set.reps === 0 
+                              ? (isDark ? '#9BA1A6' : '#687076')
+                              : (isDark ? '#F5F5F5' : '#11181C'))
                         }}
                       />
                     </View>
                     <View className="w-20 items-center">
                       <Pressable 
-                        className={`w-12 h-9 rounded-2xl items-center justify-center ${isDark ? 'bg-card-dark' : 'bg-secondary'}`}
+                        className={`w-12 h-9 rounded-2xl items-center justify-center ${set.completed ? 'bg-green-500' : (isDark ? 'bg-gray-500' : 'bg-gray-200')}`}
                         onPress={() => {
                           if (!rpeModal.isOpen && !isActionInProgressRef.current) {
                             isActionInProgressRef.current = true;
@@ -562,17 +674,21 @@ export default function LogWorkoutScreen() {
                           }
                         }}
                       >
-                        <Text className={`text-xs text-center ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                        <Text className={`text-xs text-center ${set.completed ? 'text-white' : (isDark ? 'text-foreground-dark' : 'text-foreground')}`}>
                           {set.rpe !== null ? set.rpe : 'RPE'}
                         </Text>
                       </Pressable>
                     </View>
                     <View className="w-6 items-center">
                       <Pressable 
-                        className={`w-8 h-9 rounded-2xl items-center justify-center ${set.completed ? 'bg-green-500' : (isDark ? 'bg-card-dark' : 'bg-secondary')}`}
+                        className={`w-8 h-9 rounded-2xl items-center justify-center ${set.completed ? 'bg-green-500' : (isDark ? 'bg-gray-500' : 'bg-gray-200')}`}
                         onPress={() => toggleSetCompleted(exercise.id, set.id)}
                       >
-                        {set.completed && <Check size={16} color="#FFFFFF" />}
+                        {set.completed ? (
+                          <Check size={16} color="#FFFFFF" />
+                        ) : (
+                          <Check size={16} color={isDark ? '#FFFFFF' : '#000000'} strokeWidth={2} />
+                        )}
                       </Pressable>
                     </View>
                   </View>
@@ -642,6 +758,86 @@ export default function LogWorkoutScreen() {
           </View>
         </ScrollView>
       )}
+
+      {/* Set Type Selection Modal */}
+      <Modal
+        visible={setTypeModal.isOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setSetTypeModal({ isOpen: false, exerciseId: null, setId: null });
+          isActionInProgressRef.current = false;
+        }}
+      >
+        <View className="flex-1 justify-end bg-black/50">
+          <Pressable 
+            className="flex-1"
+            onPress={() => {
+              setSetTypeModal({ isOpen: false, exerciseId: null, setId: null });
+              isActionInProgressRef.current = false;
+            }}
+          />
+          <View className={`${isDark ? 'bg-card-dark' : 'bg-card'} rounded-t-3xl p-6 pb-8`}>
+            {/* Drag Handle */}
+            <View className="items-center mb-4">
+              <View className={`w-12 h-1 rounded-full ${isDark ? 'bg-muted-foreground-dark' : 'bg-muted-foreground'}`} />
+            </View>
+
+            <Text className={`text-xl font-bold text-center mb-6 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              Select Set Type
+            </Text>
+
+            {/* Set Type Options */}
+            <View className="space-y-3">
+              {(['W', '1', 'F', 'D', 'X'] as const).map((type) => {
+                const typeInfo = getSetTypeInfo(type);
+                const isWarmUp = type === 'W';
+                const isNormal = type === '1';
+                const isFailure = type === 'F';
+                const isDropSet = type === 'D';
+                const isRemove = type === 'X';
+                
+                let iconColor = isDark ? '#F5F5F5' : '#11181C';
+                if (isWarmUp) iconColor = '#FF9500';
+                else if (isFailure || isRemove) iconColor = '#FF3B30';
+                else if (isDropSet) iconColor = '#007AFF';
+                
+                let labelColor = isDark ? '#F5F5F5' : '#11181C';
+                
+                return (
+                  <Pressable
+                    key={type}
+                    onPress={() => {
+                      handleSetTypeSelect(type);
+                      isActionInProgressRef.current = false;
+                    }}
+                    className={`flex-row items-center justify-between p-4 rounded-xl mb-3 ${isDark ? 'bg-muted-dark' : 'bg-muted'}`}
+                  >
+                    <View className="flex-row items-center flex-1">
+                      <View 
+                        className="w-8 h-8 rounded items-center justify-center mr-3"
+                      >
+                        <Text 
+                          className="text-sm font-bold"
+                          style={{ color: iconColor }}
+                        >
+                          {typeInfo.icon}
+                        </Text>
+                      </View>
+                      <Text 
+                        className="text-base flex-1"
+                        style={{ color: labelColor }}
+                      >
+                        {typeInfo.label}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* RPE Modal */}
       <Modal
@@ -793,25 +989,22 @@ export default function LogWorkoutScreen() {
                   
                   return (
                     <View key={muscle} className="flex-row items-center mb-3 px-4">
-                      <Text className={`flex-1 text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                      <Text className={`text-sm mr-3 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`} style={{ minWidth: 100 }}>
                         {muscle}
                       </Text>
-                      <View className="flex-row items-center" style={{ width: 120 }}>
+                      <View 
+                        className={`h-2 rounded-full mr-2 flex-1 ${isDark ? 'bg-muted-dark' : 'bg-muted'}`}
+                      >
                         <View 
-                          className={`h-2 rounded-full mr-2 ${isDark ? 'bg-muted-dark' : 'bg-muted'}`}
-                          style={{ flex: 1 }}
-                        >
-                          <View 
-                            className={`h-2 rounded-full ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}
-                            style={{ 
-                              width: `${progressPercentage}%`,
-                            }}
-                          />
-                        </View>
-                        <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`} style={{ minWidth: 32 }}>
-                          {count}
-                        </Text>
+                          className={`h-2 rounded-full ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}
+                          style={{ 
+                            width: `${progressPercentage}%`,
+                          }}
+                        />
                       </View>
+                      <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`} style={{ minWidth: 32 }}>
+                        {count}
+                      </Text>
                     </View>
                   );
                 })}
