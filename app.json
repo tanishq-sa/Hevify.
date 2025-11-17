@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "appathon",
-    "slug": "appathon",
+    "name": "Hevy Clone",
+    "slug": "Hevy Clone",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "appathon",
+    "icon": "./assets/images/unnamed.png",
+    "scheme": "Hevy Clone",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -23,7 +23,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/unnamed.png"
     },
     "plugins": [
       "expo-router",
