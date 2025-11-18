@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "Hevy Clone",
-    "slug": "heavily",
-    "version": "1.0.0",
+    "name": "Hevify",
+    "slug": "hevify",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/unnamed.png",
-    "scheme": "Hevy Clone",
+    "scheme": "Hevify",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.dazzzelr.heavily",
+      "bundleIdentifier": "com.dazzzelr.hevify",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -18,13 +18,13 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/unnamed.png",
+        "backgroundImage": "./assets/images/unnamed.png",
+        "monochromeImage": "./assets/images/unnamed.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.dazzzelr.heavily"
+      "package": "com.dazzzelr.hevify"
     },
     "web": {
       "output": "static",
@@ -35,7 +35,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/unnamed.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
@@ -52,7 +52,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "b467649c-4487-4a5b-b6c5-b182013c28f9"
+        "projectId": "a25c7320-f0d8-4c67-9ef9-fc3c647a1a4e"
       }
     },
     "owner": "dazzzelr"

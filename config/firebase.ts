@@ -1,6 +1,8 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, initializeAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { Platform } from 'react-native';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -15,10 +17,28 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Auth
-// Note: Firebase Auth automatically persists auth state in React Native
-// The onAuthStateChanged listener in _layout.tsx will restore the session on app start
-const auth = getAuth(app);
+// Initialize Auth with AsyncStorage persistence for React Native
+let auth: any;
+if (Platform.OS !== 'web') {
+  try {
+    // For React Native, use initializeAuth with AsyncStorage
+    const { getReactNativePersistence } = require('firebase/auth');
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage)
+    });
+  } catch (error: any) {
+    // If auth is already initialized, get the existing instance
+    if (error.code === 'auth/already-initialized') {
+      auth = getAuth(app);
+    } else {
+      // Fallback to getAuth if initializeAuth fails
+      auth = getAuth(app);
+    }
+  }
+} else {
+  // For web, use getAuth (it handles persistence automatically)
+  auth = getAuth(app);
+}
 
 // Initialize Firestore
 const db = getFirestore(app);

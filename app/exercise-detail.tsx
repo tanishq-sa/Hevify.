@@ -1,8 +1,10 @@
+import { auth, db } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, MoreVertical, Share2, Trophy } from 'lucide-react-native';
+import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
+import { ChevronLeft, Dumbbell, MoreVertical, Share2 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../global.css';
 
@@ -21,8 +23,9 @@ export default function ExerciseDetailScreen() {
   const [selectedTab, setSelectedTab] = useState<'summary' | 'history' | 'howto'>('summary');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState<'3 months' | 'Year' | 'All time'>('3 months');
-  const [isTimeRangeDropdownOpen, setIsTimeRangeDropdownOpen] = useState(false);
+  const [workoutHistory, setWorkoutHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [showMenuModal, setShowMenuModal] = useState(false);
 
   // Map muscle names to API format (using exact API muscle group names)
   const mapMuscleToAPI = (muscle: string): string => {
@@ -87,6 +90,219 @@ export default function ExerciseDetailScreen() {
     fetchMuscleImage();
   }, [primaryMuscle, secondaryMuscles.join(',')]);
 
+  // Fetch workout history for this exercise
+  useEffect(() => {
+    const fetchWorkoutHistory = async () => {
+      if (!auth.currentUser || !exerciseName) {
+        setWorkoutHistory([]);
+        setHistoryLoading(false);
+        return;
+      }
+      
+      setHistoryLoading(true);
+      try {
+        const workoutsRef = collection(db, 'workouts');
+        let querySnapshot;
+        
+        try {
+          // Try query with orderBy
+          const q = query(
+            workoutsRef,
+            where('userId', '==', auth.currentUser.uid),
+            orderBy('createdAt', 'desc')
+          );
+          querySnapshot = await getDocs(q);
+        } catch (indexError: any) {
+          // Fallback to query without orderBy if index is missing
+          if (indexError.code === 'failed-precondition' || indexError.message?.includes('index')) {
+            console.log('Using fallback query without orderBy');
+            const q = query(
+              workoutsRef,
+              where('userId', '==', auth.currentUser.uid)
+            );
+            querySnapshot = await getDocs(q);
+          } else {
+            throw indexError;
+          }
+        }
+        
+        const workouts: any[] = [];
+        
+        console.log(`Found ${querySnapshot.size} total workouts for user`);
+        
+        querySnapshot.forEach((doc) => {
+          const workoutData = doc.data();
+          
+          // Check if exercises array exists and has items
+          if (!workoutData.exercises || !Array.isArray(workoutData.exercises)) {
+            return;
+          }
+          
+          // Filter workouts that contain this exercise (case-insensitive match)
+          const hasExercise = workoutData.exercises.some((ex: any) => 
+            ex && ex.name && ex.name.trim().toLowerCase() === exerciseName.trim().toLowerCase()
+          );
+          
+          if (hasExercise) {
+            // Find the exercise data in this workout
+            const exerciseData = workoutData.exercises.find((ex: any) => 
+              ex && ex.name && ex.name.trim().toLowerCase() === exerciseName.trim().toLowerCase()
+            );
+            
+            if (exerciseData) {
+              workouts.push({
+                id: doc.id,
+                title: workoutData.title || 'Untitled Workout',
+                createdAt: workoutData.createdAt || workoutData.date,
+                exerciseData: exerciseData,
+                volume: workoutData.volume || 0,
+                sets: workoutData.sets || 0,
+              });
+            }
+          }
+        });
+        
+        // Sort by date (always sort, even if we got orderBy from query)
+        workouts.sort((a, b) => {
+          const dateA = new Date(a.createdAt || 0).getTime();
+          const dateB = new Date(b.createdAt || 0).getTime();
+          return dateB - dateA;
+        });
+        
+        console.log(`Found ${workouts.length} workouts with exercise "${exerciseName}"`);
+        setWorkoutHistory(workouts);
+      } catch (error) {
+        console.error('Error fetching workout history:', error);
+        setWorkoutHistory([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+
+    if (selectedTab === 'history') {
+      fetchWorkoutHistory();
+    }
+  }, [selectedTab, exerciseName]);
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  // Format duration
+  const formatDuration = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}min`;
+    }
+    return `${minutes}min`;
+  };
+
+  // Get exercise instructions
+  const getExerciseInstructions = (exerciseName: string) => {
+    const instructions: { [key: string]: string[] } = {
+      'Bench Press': [
+        'Lie flat on the bench with your feet firmly on the ground',
+        'Grip the bar slightly wider than shoulder-width',
+        'Lower the bar to your chest with control',
+        'Press the bar up explosively until your arms are fully extended',
+        'Keep your core tight and maintain proper form throughout'
+      ],
+      'Squat': [
+        'Stand with feet shoulder-width apart, toes slightly pointed out',
+        'Keep your chest up and core engaged',
+        'Lower your body by bending at the knees and hips',
+        'Descend until your thighs are parallel to the floor',
+        'Drive through your heels to return to the starting position'
+      ],
+      'Deadlift': [
+        'Stand with feet hip-width apart, bar over mid-foot',
+        'Bend at hips and knees to grip the bar',
+        'Keep your back straight and chest up',
+        'Drive through your heels and extend hips and knees',
+        'Stand tall with the bar, then lower with control'
+      ],
+      'Pull Up': [
+        'Hang from the bar with palms facing away, hands shoulder-width apart',
+        'Engage your lats and pull your body up',
+        'Pull until your chin clears the bar',
+        'Lower yourself with control to full arm extension',
+        'Keep your core tight throughout the movement'
+      ],
+      'Overhead Press': [
+        'Stand with feet shoulder-width apart',
+        'Hold the bar at shoulder height with palms facing forward',
+        'Press the bar straight up overhead',
+        'Fully extend your arms at the top',
+        'Lower the bar back to shoulder height with control'
+      ],
+      'Barbell Row': [
+        'Bend at the hips with a slight knee bend',
+        'Grip the bar with hands slightly wider than shoulder-width',
+        'Pull the bar to your lower chest/upper abdomen',
+        'Squeeze your back muscles at the top',
+        'Lower the bar with control to full arm extension'
+      ],
+      'Dumbbell Curl': [
+        'Stand with feet shoulder-width apart, holding dumbbells at your sides',
+        'Keep your elbows close to your body',
+        'Curl the weights up by contracting your biceps',
+        'Squeeze at the top of the movement',
+        'Lower the weights with control'
+      ],
+      'Tricep Dip': [
+        'Position your hands on parallel bars or bench',
+        'Lower your body by bending your arms',
+        'Descend until your elbows are at 90 degrees',
+        'Push up through your triceps to return to start',
+        'Keep your body upright throughout'
+      ]
+    };
+
+    return instructions[exerciseName] || [
+      'Start with proper form and posture',
+      'Control the weight throughout the entire range of motion',
+      'Focus on the target muscle group',
+      'Breathe properly - exhale on exertion, inhale on return',
+      'Use a weight that allows you to maintain proper form'
+    ];
+  };
+
+  const handleShare = async () => {
+    try {
+      let shareText = `${exerciseName}\n\n`;
+      
+      if (primaryMuscle) {
+        shareText += `Primary Muscle: ${primaryMuscle}\n`;
+      }
+      
+      if (secondaryMuscles.length > 0) {
+        shareText += `Secondary Muscles: ${secondaryMuscles.join(', ')}\n`;
+      }
+      
+      shareText += `\nHow to perform ${exerciseName}:\n\n`;
+      const instructions = getExerciseInstructions(exerciseName);
+      instructions.forEach((instruction, index) => {
+        shareText += `${index + 1}. ${instruction}\n`;
+      });
+      
+      await Share.share({
+        message: shareText,
+      });
+      setShowMenuModal(false);
+    } catch (error) {
+      console.error('Error sharing exercise:', error);
+    }
+  };
+
   return (
     <SafeAreaView 
       className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`} 
@@ -101,10 +317,10 @@ export default function ExerciseDetailScreen() {
           {exerciseName}
         </Text>
         <View className="flex-row items-center">
-          <Pressable className="mr-3">
+          <Pressable className="mr-3" onPress={handleShare}>
             <Share2 size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
           </Pressable>
-          <Pressable>
+          <Pressable onPress={() => setShowMenuModal(true)}>
             <MoreVertical size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
           </Pressable>
         </View>
@@ -168,149 +384,208 @@ export default function ExerciseDetailScreen() {
 
             {/* Exercise Summary */}
             <View className={`px-4 py-4 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
-              <Text className={`text-2xl font-bold mb-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                {exerciseName}
-              </Text>
-              <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                Primary: {primaryMuscle}
-              </Text>
-              {secondaryMuscles.length > 0 && (
-                <Text className={`text-sm mt-1 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                  Secondary: {secondaryMuscles.join(', ')}
-                </Text>
-              )}
-            </View>
-
-            {/* Progress Section */}
-            <View className={`px-4 py-4 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
-              <View className="flex-row items-center justify-between mb-4">
-                <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  Current Progress
-                </Text>
-                <View className="relative">
-                  <Pressable 
-                    className="flex-row items-center"
-                    onPress={() => setIsTimeRangeDropdownOpen(!isTimeRangeDropdownOpen)}
-                  >
-                    <Text className={`text-sm mr-1 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                      Last {timeRange}
-                    </Text>
-                    <ChevronLeft 
-                      size={16} 
-                      color={isDark ? '#9BA1A6' : '#687076'} 
-                      style={{ transform: [{ rotate: isTimeRangeDropdownOpen ? '90deg' : '-90deg' }] }} 
-                    />
-                  </Pressable>
-                  
-                  {isTimeRangeDropdownOpen && (
-                    <View 
-                      className={`absolute top-8 right-0 z-50 rounded-lg shadow-lg min-w-[120px] ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-                      style={{
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: 0.25,
-                        shadowRadius: 3.84,
-                        elevation: 5,
-                      }}
-                    >
-                      {(['3 months', 'Year', 'All time'] as const).map((option) => (
-                        <Pressable
-                          key={option}
-                          onPress={() => {
-                            setTimeRange(option);
-                            setIsTimeRangeDropdownOpen(false);
-                          }}
-                          className={`px-4 py-3 ${timeRange === option ? (isDark ? 'bg-muted-dark' : 'bg-muted') : ''}`}
-                        >
-                          <Text className={`font-medium ${timeRange === option 
-                            ? (isDark ? 'text-primary-dark' : 'text-primary')
-                            : (isDark ? 'text-foreground-dark' : 'text-foreground')
-                          }`}>
-                            {option === '3 months' ? 'Last 3 months' : option === 'Year' ? 'Last Year' : 'All time'}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
+              <View className="flex-row items-center mb-3">
+                <View className={`w-12 h-12 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
+                  <Dumbbell size={24} color={isDark ? '#9BA1A6' : '#687076'} />
+                </View>
+                <View className="flex-1">
+                  <Text className={`text-2xl font-bold mb-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                    {exerciseName}
+                  </Text>
                 </View>
               </View>
-
-              {/* Progress Graph Placeholder */}
-              <View className={`h-48 rounded-lg mb-4 ${isDark ? 'bg-card-dark' : 'bg-card'} items-center justify-center`}>
-                <Text className={isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}>
-                  Progress graph will be displayed here
-                </Text>
-              </View>
-
-              {/* Action Buttons */}
-              <View className="flex-row gap-2 mb-6">
-                <Pressable className={`flex-1 py-3 px-4 rounded-lg ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}>
-                  <Text className={`text-center font-medium ${isDark ? 'text-primary-foreground-dark' : 'text-primary-foreground'}`}>
-                    Heaviest Weight
+              <View className={`rounded-lg p-3 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
+                <View className="flex-row items-center mb-2">
+                  <Text className={`text-sm font-semibold mr-2 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                    Primary:
                   </Text>
-                </Pressable>
-                <Pressable className={`flex-1 py-3 px-4 rounded-lg ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
-                  <Text className={`text-center font-medium ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                    One Rep Max
+                  <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                    {primaryMuscle}
                   </Text>
-                </Pressable>
-                <Pressable className={`flex-1 py-3 px-4 rounded-lg ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
-                  <Text className={`text-center font-medium ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                    Best Set
-                  </Text>
-                </Pressable>
-              </View>
-
-              {/* Personal Records */}
-              <View className={`rounded-lg p-4 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
-                <View className="flex-row items-center justify-between mb-4">
-                  <View className="flex-row items-center">
-                    <Trophy size={20} color="#FCD34D" />
-                    <Text className={`text-base font-semibold ml-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                      Personal Records
+                </View>
+                {secondaryMuscles.length > 0 && (
+                  <View className="flex-row items-center flex-wrap">
+                    <Text className={`text-sm font-semibold mr-2 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                      Secondary:
+                    </Text>
+                    <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                      {secondaryMuscles.join(', ')}
                     </Text>
                   </View>
-                  <Pressable>
-                    <Text className={isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}>?</Text>
-                  </Pressable>
-                </View>
-                <View className="flex-row items-center justify-between py-2">
-                  <Text className={isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}>
-                    Heaviest Weight
-                  </Text>
-                  <Text className={`font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                    -- kg
-                  </Text>
-                </View>
-                <View className="flex-row items-center justify-between py-2">
-                  <Text className={isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}>
-                    Best 1RM
-                  </Text>
-                  <Text className={`font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                    -- kg
-                  </Text>
-                </View>
+                )}
               </View>
             </View>
           </>
         )}
 
         {selectedTab === 'history' && (
-          <View className={`px-4 py-8 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
-            <Text className={`text-center ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-              Workout history will be displayed here
-            </Text>
+          <View className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
+            {historyLoading ? (
+              <View className="flex-1 items-center justify-center py-8">
+                <ActivityIndicator size="large" color={isDark ? '#3B82F6' : '#3B82F6'} />
+                <Text className={`mt-4 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                  Loading history...
+                </Text>
+              </View>
+            ) : workoutHistory.length === 0 ? (
+              <View className="flex-1 items-center justify-center py-8 px-4">
+                <Text className={`text-center ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                  No workout history found for this exercise
+                </Text>
+              </View>
+            ) : (
+              <View className="px-4 py-4">
+                <Text className={`text-lg font-semibold mb-4 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  Workout History ({workoutHistory.length})
+                </Text>
+                <FlatList
+                  data={workoutHistory}
+                  keyExtractor={(item) => item.id}
+                  scrollEnabled={false}
+                  renderItem={({ item }) => {
+                    const completedSets = item.exerciseData?.sets?.filter((s: any) => s && s.completed) || [];
+                    const weights = completedSets.map((s: any) => s.weight || 0).filter((w: number) => w > 0);
+                    const maxWeight = weights.length > 0 ? Math.max(...weights) : 0;
+                    const totalVolume = completedSets.reduce((sum: number, s: any) => {
+                      const weight = s.weight || 0;
+                      const reps = s.reps || 0;
+                      return sum + (weight * reps);
+                    }, 0);
+
+                    return (
+                      <Pressable
+                        className={`mb-3 p-4 rounded-xl ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+                        onPress={() => router.push(`/workout-detail?id=${item.id}`)}
+                      >
+                        <View className="flex-row items-center justify-between mb-2">
+                          <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                            {item.title || 'Untitled Workout'}
+                          </Text>
+                          <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                            {formatDate(item.createdAt)}
+                          </Text>
+                        </View>
+                        <View className="flex-row items-center gap-4 mt-2">
+                          <View>
+                            <Text className={`text-xs ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                              Sets
+                            </Text>
+                            <Text className={`text-sm font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                              {completedSets.length}
+                            </Text>
+                          </View>
+                          {maxWeight > 0 && (
+                            <View>
+                              <Text className={`text-xs ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                                Max Weight
+                              </Text>
+                              <Text className={`text-sm font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                                {maxWeight} kg
+                              </Text>
+                            </View>
+                          )}
+                          {totalVolume > 0 && (
+                            <View>
+                              <Text className={`text-xs ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+                                Volume
+                              </Text>
+                              <Text className={`text-sm font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                                {totalVolume} kg
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </Pressable>
+                    );
+                  }}
+                />
+              </View>
+            )}
           </View>
         )}
 
         {selectedTab === 'howto' && (
-          <View className={`px-4 py-8 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
-            <Text className={`text-center ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-              Exercise instructions will be displayed here
+          <View className={`px-4 py-6 ${isDark ? 'bg-background-dark' : 'bg-background'}`}>
+            <Text className={`text-xl font-bold mb-4 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              How to Perform {exerciseName}
             </Text>
+            <View className={`rounded-xl p-4 mb-4 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
+              <Text className={`text-base font-semibold mb-3 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Step-by-Step Instructions
+              </Text>
+              {getExerciseInstructions(exerciseName).map((instruction, index) => (
+                <View key={index} className="flex-row mb-3">
+                  <View className={`w-6 h-6 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-primary-dark' : 'bg-primary'}`}>
+                    <Text className="text-white text-xs font-bold">{index + 1}</Text>
+                  </View>
+                  <Text className={`flex-1 text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                    {instruction}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <View className={`rounded-xl p-4 ${isDark ? 'bg-card-dark' : 'bg-card'}`}>
+              <Text className={`text-base font-semibold mb-3 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Tips
+              </Text>
+              <View className="mb-2">
+                <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  • Focus on proper form over heavy weight
+                </Text>
+              </View>
+              <View className="mb-2">
+                <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  • Control the weight throughout the entire movement
+                </Text>
+              </View>
+              <View className="mb-2">
+                <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  • Breathe properly - exhale on exertion
+                </Text>
+              </View>
+              <View className="mb-2">
+                <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  • Warm up before lifting heavy weights
+                </Text>
+              </View>
+              <View>
+                <Text className={`text-sm ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  • Rest adequately between sets
+                </Text>
+              </View>
+            </View>
           </View>
         )}
       </ScrollView>
+
+      {/* Menu Modal */}
+      <Modal
+        visible={showMenuModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMenuModal(false)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onPress={() => setShowMenuModal(false)}
+        >
+          <Pressable
+            className={`rounded-2xl p-4 w-11/12 max-w-sm ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Pressable
+              className="flex-row items-center py-3 px-4 rounded-lg active:opacity-70"
+              onPress={handleShare}
+            >
+              <Share2 size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
+              <Text className={`ml-3 text-base ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Share Exercise
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }

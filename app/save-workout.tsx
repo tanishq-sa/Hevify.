@@ -1,11 +1,12 @@
 import { auth } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { updateUserStats } from '@/utils/firestore-init';
-import { clearWorkoutData as clearWorkout, loadWorkoutData as loadWorkout, saveCompletedWorkout } from '@/utils/workout-storage';
+import { clearWorkoutData as clearWorkout, hasWorkoutInProgress, loadWorkoutData as loadWorkout, saveCompletedWorkout } from '@/utils/workout-storage';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, Lock, Users } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -25,6 +26,8 @@ export default function SaveWorkoutScreen() {
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<'Everyone' | 'Private'>('Everyone');
   const [visibilityModal, setVisibilityModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
 
   // Load workout data from storage
   const [workoutData, setWorkoutData] = useState<any>(null);
@@ -78,10 +81,32 @@ export default function SaveWorkoutScreen() {
   };
 
   const handleSave = async () => {
+    // Prevent multiple simultaneous saves
+    if (isSavingRef.current || isSaving) {
+      console.log('Save already in progress, ignoring duplicate save request');
+      return;
+    }
+
+    // Check if workout data exists
+    if (!workoutData) {
+      console.log('No workout data to save');
+      return;
+    }
+
     try {
+      isSavingRef.current = true;
+      setIsSaving(true);
+
+      // Store workout data before clearing to prevent re-saves
+      const dataToSave = workoutData;
+      
+      // Clear workout data immediately to prevent re-saves
+      await clearWorkout();
+      setWorkoutData(null);
+
       // Filter exercises to only include those with completed sets
       // And filter sets to only include completed ones
-      const filteredExercises = (workoutData?.exercises || [])
+      const filteredExercises = (dataToSave?.exercises || [])
         .map((exercise: any) => {
           // Filter to only completed sets
           const completedSets = (exercise.sets || []).filter((set: any) => set.completed);
@@ -106,7 +131,7 @@ export default function SaveWorkoutScreen() {
       const workoutSummary = {
         title: workoutTitle || 'Workout title',
         description: description || '',
-        duration: workoutData?.duration || 0,
+        duration: dataToSave?.duration || 0,
         exercises: filteredExercises, // Only exercises with completed sets
         volume: totalVolume, // Only counts completed sets
         sets: totalSets, // Only counts completed sets
@@ -123,26 +148,28 @@ export default function SaveWorkoutScreen() {
           sets: totalSets,
         });
       }
+
+      // Clear component state to free memory
+      setWorkoutTitle('');
+      setDescription('');
+      setVisibility('Everyone');
+
+      // Verify workout data is cleared
+      const stillHasWorkout = await hasWorkoutInProgress();
+      if (stillHasWorkout) {
+        console.warn('Workout data still exists after clear, forcing removal...');
+        await clearWorkout();
+      }
+
+      // Navigate to home only after successful save
+      router.replace('/(tabs)');
     } catch (error) {
       console.error('Error saving workout:', error);
-      throw error; // Re-throw to prevent navigation if save fails
-    } finally {
-      // Always clear local workout data after save attempt
-      // This ensures local storage and memory are cleared even if there's an error
-      try {
-        await clearWorkout();
-        // Also clear component state to free memory
-        setWorkoutData(null);
-        setWorkoutTitle('');
-        setDescription('');
-        setVisibility('Everyone');
-      } catch (clearError) {
-        console.error('Error clearing workout data:', clearError);
-      }
+      // Reset saving state on error so user can try again
+      isSavingRef.current = false;
+      setIsSaving(false);
+      // Don't navigate on error - let user try again or discard
     }
-
-    // Navigate to home only after successful save
-    router.replace('/(tabs)');
   };
 
   const handleDiscard = async () => {
@@ -183,15 +210,26 @@ export default function SaveWorkoutScreen() {
           Save Workout
         </Text>
         <Pressable 
-          className="px-6 py-3 rounded-xl"
+          className="px-6 py-3 rounded-xl flex-row items-center justify-center"
           style={{
-            backgroundColor: '#3B82F6',
+            backgroundColor: isSaving ? '#9CA3AF' : '#3B82F6',
+            opacity: isSaving ? 0.7 : 1,
           }}
           onPress={handleSave}
+          disabled={isSaving}
         >
-          <Text className="font-semibold text-white text-base">
-            Save
-          </Text>
+          {isSaving ? (
+            <>
+              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text className="font-semibold text-white text-base">
+                Saving...
+              </Text>
+            </>
+          ) : (
+            <Text className="font-semibold text-white text-base">
+              Save
+            </Text>
+          )}
         </Pressable>
       </View>
 

@@ -45,10 +45,14 @@ export default function RootLayout() {
     const inAuthGroup = segments[0] === '(tabs)' || 
                        segments[0] === 'log-workout' || 
                        segments[0] === 'add-exercise' ||
+                       segments[0] === 'add-exercise-to-routine' ||
                        segments[0] === 'exercise-detail' ||
                        segments[0] === 'reorder-exercises' ||
                        segments[0] === 'save-workout' ||
-                       segments[0] === 'workout-detail';
+                       segments[0] === 'workout-detail' ||
+                       segments[0] === 'new-routine' ||
+                       segments[0] === 'edit-routine' ||
+                       segments[0] === 'user-profile';
 
     if (!isAuthenticated && inAuthGroup) {
       // User is not authenticated but trying to access protected route
@@ -79,10 +83,14 @@ export default function RootLayout() {
         <Stack.Screen name="signup" options={{ headerShown: false }} />
         <Stack.Screen name="log-workout" options={{ headerShown: false }} />
         <Stack.Screen name="add-exercise" options={{ headerShown: false }} />
+        <Stack.Screen name="add-exercise-to-routine" options={{ headerShown: false }} />
         <Stack.Screen name="exercise-detail" options={{ headerShown: false }} />
         <Stack.Screen name="reorder-exercises" options={{ headerShown: false }} />
         <Stack.Screen name="save-workout" options={{ headerShown: false }} />
         <Stack.Screen name="workout-detail" options={{ headerShown: false }} />
+        <Stack.Screen name="new-routine" options={{ headerShown: false }} />
+        <Stack.Screen name="edit-routine" options={{ headerShown: false }} />
+        <Stack.Screen name="user-profile" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />

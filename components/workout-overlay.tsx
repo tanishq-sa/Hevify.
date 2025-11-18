@@ -1,9 +1,10 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { clearWorkoutData, hasWorkoutInProgress, loadWorkoutData } from '@/utils/workout-storage';
-import { useRouter, useSegments } from 'expo-router';
+import { useFocusEffect, useRouter, useSegments } from 'expo-router';
 import { Play, X } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import '../global.css';
 
 export function WorkoutOverlay() {
@@ -11,10 +12,14 @@ export function WorkoutOverlay() {
   const isDark = colorScheme === 'dark';
   const router = useRouter();
   const segments = useSegments();
+  const insets = useSafeAreaInsets();
   const [isWorkoutActive, setIsWorkoutActive] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
+  
+  // Tab bar height is typically 49-56px, plus safe area bottom
+  const tabBarHeight = 49 + insets.bottom;
 
   // Hide overlay when on log-workout screen
   const isOnWorkoutScreen = segments.some(segment => segment === 'log-workout');
@@ -31,8 +36,8 @@ export function WorkoutOverlay() {
         setDuration(0);
       }
     } catch (error) {
-      console.error('Error checking workout status:', error);
       setIsWorkoutActive(false);
+      setDuration(0);
     } finally {
       setIsLoading(false);
     }
@@ -41,17 +46,21 @@ export function WorkoutOverlay() {
   useEffect(() => {
     checkWorkoutStatus();
     
-    // Check every 5 seconds for workout status changes
-    const interval = setInterval(checkWorkoutStatus, 5000);
+    // Check every 1 second for workout status changes (more frequent to catch saves)
+    const interval = setInterval(checkWorkoutStatus, 1000);
     
     return () => clearInterval(interval);
   }, [checkWorkoutStatus]);
 
-  // Also check when component comes into focus
-  useEffect(() => {
-    const focusInterval = setInterval(checkWorkoutStatus, 1000);
-    return () => clearInterval(focusInterval);
-  }, [checkWorkoutStatus]);
+  // Check immediately when screen comes into focus (e.g., after saving workout)
+  useFocusEffect(
+    useCallback(() => {
+      // Check immediately and then again after a short delay to catch async clears
+      checkWorkoutStatus();
+      const timeout = setTimeout(checkWorkoutStatus, 500);
+      return () => clearTimeout(timeout);
+    }, [checkWorkoutStatus])
+  );
 
   const formatDuration = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
@@ -90,52 +99,59 @@ export function WorkoutOverlay() {
 
   return (
     <View
-      className={`absolute left-0 right-0 border-t ${
-        isDark ? 'bg-card-dark border-border-dark' : 'bg-card border-border'
+      className={`absolute left-0 right-0 ${
+        isDark ? 'bg-card-dark' : 'bg-card'
       }`}
       style={{
-        bottom: 60, // Position above tab bar (typical tab bar height is ~60px)
-        borderTopLeftRadius: 12,
-        borderTopRightRadius: 12,
+        bottom: tabBarHeight, // Position directly above tab bar
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 8,
       }}
     >
-      <View className="px-4 py-4">
+      <View className="px-5 py-5">
         <Text
-          className={`text-sm font-medium mb-4 text-center ${
-            isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'
+          className={`text-base font-semibold mb-5 text-center ${
+            isDark ? 'text-foreground-dark' : 'text-foreground'
           }`}
         >
           Workout in Progress
         </Text>
         
-        <View className="flex-row items-center justify-between gap-3">
+        <View className="flex-row items-center gap-3">
           <Pressable
             onPress={handleResume}
-            className={`flex-row items-center justify-center flex-1 px-4 py-2.5 rounded-lg ${
-              isDark ? 'bg-primary-dark active:opacity-80' : 'bg-primary active:opacity-90'
-            }`}
+            className="flex-row items-center justify-center flex-1 px-5 py-3.5 rounded-xl"
+            style={{
+              backgroundColor: '#3B82F6',
+            }}
           >
             <Play 
-              size={16} 
-              color={isDark ? '#0A0A0A' : '#FFFFFF'} 
-              fill={isDark ? '#0A0A0A' : '#FFFFFF'} 
+              size={18} 
+              color="#FFFFFF" 
+              fill="#FFFFFF" 
             />
-            <Text className={`font-semibold ml-2 ${isDark ? 'text-primary-foreground-dark' : 'text-primary-foreground'}`}>
+            <Text className="text-white font-semibold ml-2 text-base">
               Resume
             </Text>
           </Pressable>
           
           <Pressable
             onPress={handleDiscard}
-            className={`flex-row items-center justify-center flex-1 px-4 py-2.5 rounded-lg ${
-              isDark ? 'bg-destructive-dark active:opacity-80' : 'bg-destructive active:opacity-90'
-            }`}
+            className="flex-row items-center justify-center flex-1 px-5 py-3.5 rounded-xl"
+            style={{
+              backgroundColor: '#EF4444',
+            }}
           >
             <X 
-              size={16} 
+              size={18} 
               color="#FFFFFF" 
             />
-            <Text className="text-white font-semibold ml-2">
+            <Text className="text-white font-semibold ml-2 text-base">
               Discard
             </Text>
           </Pressable>
