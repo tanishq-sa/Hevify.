@@ -79,8 +79,10 @@ export default function SignupScreen() {
         setError('Invalid email address');
       } else if (error.code === 'auth/weak-password') {
         setError('Password is too weak');
+      } else if (error.code === 'auth/invalid-credential') {
+        setError('Invalid credentials. Please check your information and try again.');
       } else {
-        setError('An error occurred. Please try again.');
+        setError(error.message || 'An error occurred. Please try again.');
       }
     } finally {
       setLoading(false);

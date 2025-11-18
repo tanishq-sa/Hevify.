@@ -81,6 +81,12 @@ export const addComment = async (
       throw new Error('User not authenticated');
     }
 
+    // Fetch user document to get username
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    const userDoc = await getDoc(userRef);
+    const userData = userDoc.exists() ? userDoc.data() : null;
+    const username = userData?.username || auth.currentUser.email?.split('@')[0] || 'User';
+
     const workoutRef = doc(db, 'workouts', workoutId);
     const workoutDoc = await getDoc(workoutRef);
 
@@ -92,7 +98,7 @@ export const addComment = async (
     const newComment = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       userId: auth.currentUser.uid,
-      username: auth.currentUser.email?.split('@')[0] || 'User',
+      username: username,
       text,
       createdAt: new Date().toISOString(),
     };
@@ -119,7 +125,14 @@ export const getWorkoutComments = async (workoutId: string): Promise<any[]> => {
     }
 
     const workoutData = workoutDoc.data();
-    return workoutData.comments || [];
+    const comments = workoutData.comments || [];
+    
+    // Sort comments by date (newest first)
+    return comments.sort((a: any, b: any) => {
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
   } catch (error) {
     console.error('Error getting workout comments:', error);
     return [];

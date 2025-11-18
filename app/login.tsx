@@ -57,8 +57,12 @@ export default function LoginScreen() {
         setError('No account found with this email');
       } else if (error.code === 'auth/wrong-password') {
         setError('Incorrect password');
+      } else if (error.code === 'auth/invalid-credential') {
+        setError('Invalid email or password. Please check your credentials and try again.');
+      } else if (error.code === 'auth/invalid-login-credentials') {
+        setError('Invalid email or password. Please check your credentials and try again.');
       } else {
-        setError('An error occurred. Please try again.');
+        setError(error.message || 'An error occurred. Please try again.');
       }
     } finally {
       setLoading(false);

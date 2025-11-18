@@ -1,5 +1,5 @@
 import { auth, db } from '@/config/firebase';
-import { deleteCurrentWorkoutDocument } from '@/utils/firestore-init';
+import { deleteCurrentWorkoutDocument, getUserDocument } from '@/utils/firestore-init';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 
@@ -128,7 +128,9 @@ export const clearWorkoutData = async () => {
 export const hasWorkoutInProgress = async (): Promise<boolean> => {
   try {
     const exercisesData = await AsyncStorage.getItem(CURRENT_WORKOUT_KEY);
-    return exercisesData !== null && exercisesData !== '[]';
+    const hasData = exercisesData !== null && exercisesData !== '[]' && exercisesData.trim() !== '';
+    console.log('hasWorkoutInProgress check:', { exercisesData, hasData });
+    return hasData;
   } catch (error) {
     console.error('Error checking workout status:', error);
     return false;
@@ -141,9 +143,16 @@ export const saveCompletedWorkout = async (workoutData: any) => {
     const user = auth.currentUser;
     if (!user) throw new Error('User not authenticated');
 
+    // Fetch user document to get username and avatar
+    const userDoc = await getUserDocument(user.uid);
+    const username = (userDoc as any)?.username || user.email?.split('@')[0] || 'User';
+    const avatar = (userDoc as any)?.avatar || null;
+
     const workoutRef = await addDoc(collection(db, 'workouts'), {
       ...workoutData,
       userId: user.uid,
+      username, // Store username in workout document
+      avatar, // Store avatar in workout document
       visibility: workoutData.visibility || 'Everyone', // Default to Everyone if not specified
       likes: workoutData.likes || [], // Initialize likes array
       comments: workoutData.comments || [], // Initialize comments array

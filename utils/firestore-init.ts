@@ -1,5 +1,5 @@
 import { db } from '@/config/firebase';
-import { deleteDoc, doc, getDoc, increment, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, increment, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 
 /**
  * Initialize user document in Firestore
@@ -201,6 +201,80 @@ export const getUserDocument = async (userId: string) => {
   } catch (error) {
     console.error('Error getting user document:', error);
     return null;
+  }
+};
+
+/**
+ * Update user profile (username and avatar)
+ * Also updates all workout documents with the new username
+ */
+export const updateUserProfile = async (userId: string, updates: {
+  username?: string;
+  avatar?: string;
+}) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const updateData: any = {
+      updatedAt: new Date().toISOString(),
+    };
+    
+    if (updates.username !== undefined) {
+      updateData.username = updates.username;
+    }
+    if (updates.avatar !== undefined) {
+      updateData.avatar = updates.avatar;
+    }
+    
+    await updateDoc(userRef, updateData);
+    console.log('User profile updated');
+    
+    // If username was updated, update all workout documents
+    if (updates.username !== undefined) {
+      try {
+        const workoutsRef = collection(db, 'workouts');
+        const q = query(workoutsRef, where('userId', '==', userId));
+        const querySnapshot = await getDocs(q);
+        
+        if (querySnapshot.size > 0) {
+          // Use batch writes for efficiency (max 500 operations per batch)
+          const batches: any[] = [];
+          let currentBatch = writeBatch(db);
+          let batchCount = 0;
+          const maxBatchSize = 500;
+          
+          querySnapshot.docs.forEach((workoutDoc) => {
+            currentBatch.update(workoutDoc.ref, {
+              username: updates.username,
+              updatedAt: new Date().toISOString(),
+            });
+            batchCount++;
+            
+            // Create new batch if it reaches max size
+            if (batchCount >= maxBatchSize) {
+              batches.push(currentBatch);
+              currentBatch = writeBatch(db);
+              batchCount = 0;
+            }
+          });
+          
+          // Add the last batch if it has any operations
+          if (batchCount > 0) {
+            batches.push(currentBatch);
+          }
+          
+          // Commit all batches
+          await Promise.all(batches.map(batch => batch.commit()));
+          
+          console.log(`Updated ${querySnapshot.size} workout documents with new username`);
+        }
+      } catch (workoutUpdateError) {
+        console.error('Error updating workout documents:', workoutUpdateError);
+        // Don't throw - user profile was updated successfully
+      }
+    }
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+    throw error;
   }
 };
 

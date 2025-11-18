@@ -1,19 +1,21 @@
-import { db } from '@/config/firebase';
+import { auth, db } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getWorkoutById } from '@/utils/workout-storage';
 import { addComment, getWorkoutComments, getWorkoutLikes, toggleLike } from '@/utils/workout-interactions';
+import { getWorkoutById } from '@/utils/workout-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc } from 'firebase/firestore';
-import { ChevronLeft, Lock, MessageCircle, MoreVertical, Send, ThumbsUp, X } from 'lucide-react-native';
+import { deleteDoc, doc, getDoc } from 'firebase/firestore';
+import { ChevronLeft, Lock, MessageCircle, MoreVertical, Send, Share2, ThumbsUp, Trash2, X } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
-    Image,
-    Modal,
-    Pressable,
-    ScrollView,
-    Text,
-    TextInput,
-    View
+  Alert,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  Share,
+  Text,
+  TextInput,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../global.css';
@@ -30,6 +32,8 @@ export default function WorkoutDetailScreen() {
   const [showCommentModal, setShowCommentModal] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [userInfo, setUserInfo] = useState<{ username: string; avatar: string } | null>(null);
+  const [showMenuModal, setShowMenuModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
     loadWorkout();
@@ -202,12 +206,105 @@ export default function WorkoutDetailScreen() {
 
   const getSetTypeLabel = (setType?: string) => {
     switch (setType) {
-      case 'W': return 'W';
-      case 'F': return 'F';
-      case 'D': return 'D';
+      case 'W': return 'Warm-up';
+      case 'F': return 'Failure';
+      case 'D': return 'Drop';
       default: return null;
     }
   };
+
+  const formatDateForShare = (dateString: string) => {
+    const date = new Date(dateString);
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const dayName = days[date.getDay()];
+    const month = months[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+    
+    let hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const minutesStr = minutes < 10 ? `0${minutes}` : minutes;
+    
+    return `${dayName}, ${month} ${day}, ${year} at ${hours}:${minutesStr}${ampm}`;
+  };
+
+  const formatWorkoutForShare = () => {
+    if (!workout) return '';
+    
+    let shareText = `${workout.title || 'Workout'}\n\n`;
+    shareText += `${formatDateForShare(workout.createdAt || workout.date)}\n\n\n`;
+    
+    workout.exercises.forEach((exercise: any) => {
+      shareText += `${exercise.name}\n\n`;
+      
+      let setNumber = 1;
+      exercise.sets.forEach((set: any) => {
+        if (!set.completed) return;
+        
+        shareText += `Set ${setNumber}: `;
+        
+        if (set.weight !== undefined && set.weight > 0) {
+          shareText += `${set.weight} kg x ${set.reps}`;
+        } else if (set.reps !== undefined && set.reps > 0) {
+          shareText += `${set.reps} reps`;
+        } else if (set.duration) {
+          shareText += `${set.duration}s`;
+        }
+        
+        if (set.rpe) {
+          shareText += ` @ ${set.rpe} rpe`;
+        }
+        
+        const setTypeLabel = getSetTypeLabel(set.setType);
+        if (setTypeLabel) {
+          shareText += ` [${setTypeLabel}]`;
+        }
+        
+        shareText += '\n';
+        setNumber++;
+      });
+      
+      shareText += '\n';
+    });
+    
+    
+    return shareText;
+  };
+
+  const handleShare = async () => {
+    try {
+      const shareText = formatWorkoutForShare();
+      await Share.share({
+        message: shareText,
+      });
+      setShowMenuModal(false);
+    } catch (error) {
+      console.error('Error sharing workout:', error);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      const workoutId = params.id as string;
+      if (workoutId && auth.currentUser) {
+        const workoutRef = doc(db, 'workouts', workoutId);
+        await deleteDoc(workoutRef);
+        setShowDeleteModal(false);
+        setShowMenuModal(false);
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error deleting workout:', error);
+      Alert.alert('Error', 'Failed to delete workout. Please try again.');
+    }
+  };
+
+  const isOwner = auth.currentUser && workout?.userId === auth.currentUser.uid;
 
   if (!workout) {
     return (
@@ -231,7 +328,7 @@ export default function WorkoutDetailScreen() {
         <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
           Workout Detail
         </Text>
-        <Pressable>
+        <Pressable onPress={() => setShowMenuModal(true)}>
           <MoreVertical size={24} color={isDark ? '#F5F5F5' : '#11181C'} />
         </Pressable>
       </View>
@@ -295,19 +392,6 @@ export default function WorkoutDetailScreen() {
               <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
                 {workout.sets}
               </Text>
-            </View>
-            <View className="flex-1">
-              <Text className={`text-xs ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-                Records
-              </Text>
-              <View className="flex-row items-center">
-                <Text className={`text-lg font-semibold mr-1 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  🏅
-                </Text>
-                <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-                  0
-                </Text>
-              </View>
             </View>
           </View>
 
@@ -377,9 +461,22 @@ export default function WorkoutDetailScreen() {
                 <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-muted-dark' : 'bg-muted'}`}>
                   <Text className="text-lg">🏋️</Text>
                 </View>
-                <Text className={`text-base font-semibold ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
-                  {exercise.name}
-                </Text>
+                <Pressable
+                  onPress={() => {
+                    router.push({
+                      pathname: '/exercise-detail',
+                      params: {
+                        name: exercise.name,
+                        primaryMuscle: exercise.primaryMuscle || '',
+                        secondaryMuscles: exercise.secondaryMuscles?.join(',') || '',
+                      },
+                    } as any);
+                  }}
+                >
+                  <Text className={`text-base font-semibold ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
+                    {exercise.name}
+                  </Text>
+                </Pressable>
               </View>
 
               {/* Sets Header */}
@@ -409,7 +506,7 @@ export default function WorkoutDetailScreen() {
                         {setIndex + 1}
                       </Text>
                       {setTypeLabel && (
-                        <Text className={`ml-1 text-xs font-semibold ${setTypeLabel === 'W' ? 'text-yellow-500' : 'text-orange-500'}`}>
+                        <Text className={`ml-1 text-xs font-semibold ${setTypeLabel === 'Warm-up' ? 'text-yellow-500' : 'text-orange-500'}`}>
                           {setTypeLabel}
                         </Text>
                       )}
@@ -527,6 +624,96 @@ export default function WorkoutDetailScreen() {
                 <Send size={18} color={commentText.trim() ? '#FFFFFF' : (isDark ? '#9BA1A6' : '#687076')} />
                 <Text className={`ml-2 font-semibold ${commentText.trim() ? 'text-white' : (isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground')}`}>
                   Post Comment
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Menu Modal */}
+      <Modal
+        visible={showMenuModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMenuModal(false)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onPress={() => setShowMenuModal(false)}
+        >
+          <Pressable
+            className={`rounded-2xl p-4 w-11/12 max-w-sm ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Pressable
+              className="flex-row items-center py-3 px-4 rounded-lg active:opacity-70"
+              onPress={handleShare}
+            >
+              <Share2 size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
+              <Text className={`ml-3 text-base ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Share Workout
+              </Text>
+            </Pressable>
+            
+            {isOwner && (
+              <Pressable
+                className="flex-row items-center py-3 px-4 rounded-lg active:opacity-70 mt-2"
+                onPress={() => {
+                  setShowMenuModal(false);
+                  setShowDeleteModal(true);
+                }}
+              >
+                <Trash2 size={20} color="#EF4444" />
+                <Text className="ml-3 text-base text-destructive">
+                  Remove Workout
+                </Text>
+              </Pressable>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onPress={() => setShowDeleteModal(false)}
+        >
+          <Pressable
+            className={`rounded-2xl p-6 w-11/12 max-w-sm ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text className={`text-xl font-bold mb-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              Remove Workout
+            </Text>
+            <Text className={`text-base mb-6 ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+              Are you sure you want to remove this workout? This action cannot be undone.
+            </Text>
+            
+            <View className="flex-row gap-3">
+              <Pressable
+                className={`flex-1 py-3 rounded-lg items-center ${isDark ? 'bg-muted-dark' : 'bg-muted'}`}
+                onPress={() => setShowDeleteModal(false)}
+              >
+                <Text className={`font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                  Cancel
+                </Text>
+              </Pressable>
+              
+              <Pressable
+                className="flex-1 py-3 rounded-lg items-center bg-destructive active:opacity-90"
+                onPress={handleDelete}
+              >
+                <Text className="text-white font-semibold">
+                  Remove
                 </Text>
               </Pressable>
             </View>

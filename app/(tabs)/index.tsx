@@ -1,20 +1,18 @@
 import { auth, db } from '@/config/firebase';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getWorkoutComments, getWorkoutLikes, toggleLike } from '@/utils/workout-interactions';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import {
-  Bell,
   ChevronDown,
   Lock,
   MessageCircle,
-  Search,
   ThumbsUp,
-  Trophy,
   X
 } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Pressable,
@@ -105,8 +103,9 @@ const fetchPublicWorkouts = async (limitCount: number = 50) => {
         const workout: any = {
           id: workoutDoc.id,
           ...workoutData,
-          username: userData?.username || userData?.email?.split('@')[0] || 'User',
-          avatar: userData?.avatar || null, // Only use Firebase avatar, no fallback
+          // Use username/avatar from workout document if available, otherwise fetch from user document
+          username: workoutData.username || userData?.username || userData?.email?.split('@')[0] || 'User',
+          avatar: workoutData.avatar || userData?.avatar || null,
         };
         
         // Log workout data for debugging
@@ -186,8 +185,9 @@ const fetchPublicWorkouts = async (limitCount: number = 50) => {
           const workout: any = {
             id: workoutDoc.id,
             ...workoutData,
-            username: userData?.username || userData?.email?.split('@')[0] || 'User',
-            avatar: userData?.avatar || null, // Only use Firebase avatar, no fallback
+            // Use username/avatar from workout document if available, otherwise fetch from user document
+            username: workoutData.username || userData?.username || userData?.email?.split('@')[0] || 'User',
+            avatar: workoutData.avatar || userData?.avatar || null,
           };
           
           // Log workout data for debugging
@@ -252,14 +252,35 @@ export default function HomeScreen() {
     const [displayedWorkouts, setDisplayedWorkouts] = useState([]);
   const [completedWorkouts, setCompletedWorkouts] = useState<any[]>([]);
   const [suggestedAthletes, setSuggestedAthletes] = useState<Array<{ id: string; username: string; avatar: string }>>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Load completed workouts and suggested athletes once when screen mounts
   useEffect(() => {
-    loadCompletedWorkouts();
-    loadSuggestedAthletes();
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        await Promise.all([
+          loadCompletedWorkouts(),
+          loadSuggestedAthletes()
+        ]);
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
     // We intentionally fetch only once on mount; user must pull-to-refresh or reopen app to refresh feed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refresh comment counts when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      setRefreshKey(prev => prev + 1);
+    }, [])
+  );
 
   const loadSuggestedAthletes = async () => {
     try {
@@ -309,6 +330,7 @@ export default function HomeScreen() {
         
         return {
           id: workout.id,
+          userId: workout.userId, // Include userId for profile navigation
           username: workout.username || 'User',
           avatar: workout.avatar || null, // Only use Firebase avatar, no fallback
           timeAgo: formatTimeAgo(workout.createdAt || workout.date),
@@ -317,8 +339,7 @@ export default function HomeScreen() {
           description: workout.description || '',
           stats: {
             time: formatDuration(workout.duration || 0),
-            volume: `${workout.volume || 0} kg`,
-            records: workout.stats?.records || 0
+            volume: `${workout.volume || 0} kg`
           },
           exercises: (workout.exercises || []).slice(0, 3).map((ex: any) => ({
             name: ex.name || 'Exercise',
@@ -425,7 +446,7 @@ export default function HomeScreen() {
   };
 
   // Component for comment button with count from Firebase
-  const WorkoutCommentButton = ({ workoutId }: { workoutId: string }) => {
+  const WorkoutCommentButton = ({ workoutId, refreshKey }: { workoutId: string; refreshKey: number }) => {
     const [commentsCount, setCommentsCount] = useState(0);
 
     useEffect(() => {
@@ -440,12 +461,13 @@ export default function HomeScreen() {
       if (workoutId) {
         loadCommentCount();
       }
-    }, [workoutId]);
+    }, [workoutId, refreshKey]);
 
     return (
       <Pressable 
         className="flex-row items-center mr-6"
-        onPress={() => {
+        onPress={(e) => {
+          e.stopPropagation();
           if (workoutId) {
             router.push(`/workout-detail?id=${workoutId}`);
           }
@@ -474,14 +496,32 @@ export default function HomeScreen() {
     >
       {/* User Header */}
       <View className="flex-row items-center mb-3">
-        <Image
-          source={{ uri: item.avatar || 'https://i.pravatar.cc/150?img=12' }}
-          className="w-12 h-12 rounded-full mr-3"
-        />
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation();
+            if (item.userId) {
+              router.push(`/user-profile?userId=${item.userId}`);
+            }
+          }}
+        >
+          <Image
+            source={{ uri: item.avatar || 'https://i.pravatar.cc/150?img=12' }}
+            className="w-12 h-12 rounded-full mr-3"
+          />
+        </Pressable>
         <View className="flex-1">
-          <Text className={`font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-            {item.username}
-          </Text>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              if (item.userId) {
+                router.push(`/user-profile?userId=${item.userId}`);
+              }
+            }}
+          >
+            <Text className={`font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+              {item.username}
+            </Text>
+          </Pressable>
           <View className="flex-row items-center mt-1">
             <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
               {item.timeAgo}
@@ -528,24 +568,13 @@ export default function HomeScreen() {
             {item.stats?.volume || `${(item as any).rawData?.volume || (item as any).totalVolume || 0} kg`}
           </Text>
         </View>
-        <View className="mr-6">
+        <View>
           <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
             Sets
           </Text>
           <Text className={`text-base font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
             {(item as any).rawData?.sets || (item as any).totalSets || 0}
           </Text>
-        </View>
-        <View>
-          <Text className={`text-sm ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
-            Records
-          </Text>
-          <View className="flex-row items-center">
-            <Trophy size={16} color="#FCD34D" />
-            <Text className={`text-base font-semibold ml-1 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-              {item.stats.records}
-            </Text>
-          </View>
         </View>
       </View>
 
@@ -578,7 +607,7 @@ export default function HomeScreen() {
       {/* Interaction Buttons */}
       <View className={`flex-row items-center pt-3 ${isDark ? 'border-t border-border-dark' : 'border-t border-border'}`}>
         <WorkoutLikeButton workoutId={item.id} />
-        <WorkoutCommentButton workoutId={item.id} />
+        <WorkoutCommentButton workoutId={item.id} refreshKey={refreshKey} />
       </View>
     </Pressable>
   );
@@ -586,19 +615,58 @@ export default function HomeScreen() {
   const renderSuggestedAthlete = ({ item }: { item: typeof suggestedAthletes[0] }) => (
     <View className="mr-3 items-center">
       <View className="relative">
-        <Image
-          source={{ uri: item.avatar || 'https://i.pravatar.cc/150?img=12' }}
-          className="w-16 h-16 rounded-full"
-        />
-        <Pressable className="absolute -top-1 -right-1 bg-destructive rounded-full p-1">
+        <Pressable
+          onPress={() => {
+            if (item.id) {
+              router.push(`/user-profile?userId=${item.id}`);
+            }
+          }}
+        >
+          <Image
+            source={{ uri: item.avatar || 'https://i.pravatar.cc/150?img=12' }}
+            className="w-16 h-16 rounded-full"
+          />
+        </Pressable>
+        <Pressable 
+          className="absolute -top-1 -right-1 bg-destructive rounded-full p-1"
+          onPress={(e) => {
+            e.stopPropagation();
+            // Remove from suggested athletes (optional - can implement later)
+          }}
+        >
           <X size={12} color="#FFFFFF" />
         </Pressable>
       </View>
-      <Text className={`text-xs mt-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
-        {item.username}
-      </Text>
+      <Pressable
+        onPress={() => {
+          if (item.id) {
+            router.push(`/user-profile?userId=${item.id}`);
+          }
+        }}
+      >
+        <Text className={`text-xs mt-2 ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+          {item.username}
+        </Text>
+      </Pressable>
     </View>
   );
+
+  // Show loading screen while data is being fetched
+  if (isLoading) {
+    return (
+      <SafeAreaView 
+        className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`} 
+        edges={['top', 'left', 'right']}
+      >
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={isDark ? '#3B82F6' : '#3B82F6'} />
+          <Text className={`mt-4 text-base ${isDark ? 'text-muted-foreground-dark' : 'text-muted-foreground'}`}>
+            Loading workouts...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView 
@@ -654,15 +722,6 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
-        <View className="flex-row items-center">
-          <Pressable className="mr-4">
-            <Search size={22} color={isDark ? '#F5F5F5' : '#11181C'} />
-          </Pressable>
-          <Pressable className="relative">
-            <Bell size={22} color={isDark ? '#F5F5F5' : '#11181C'} />
-            <View className="absolute -top-1 -right-1 w-2 h-2 bg-destructive rounded-full" />
-          </Pressable>
-        </View>
       </View>
       
       {/* Overlay to close dropdown when clicking outside */}
@@ -690,15 +749,10 @@ export default function HomeScreen() {
         />
 
         <View className="mt-6 mb-4">
-          <View className="flex-row items-center justify-between px-4 mb-3">
+          <View className="px-4 mb-3">
             <Text className={`text-lg font-semibold ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
               Suggested Athletes
             </Text>
-            <Pressable>
-              <Text className={`text-sm ${isDark ? 'text-primary-dark' : 'text-primary'}`}>
-                + Invite a friend
-              </Text>
-            </Pressable>
           </View>
           <FlatList
             data={suggestedAthletes}
