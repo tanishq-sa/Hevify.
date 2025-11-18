@@ -22,7 +22,6 @@ export function WorkoutOverlay() {
   const checkWorkoutStatus = useCallback(async () => {
     try {
       const hasWorkout = await hasWorkoutInProgress();
-      console.log('Workout overlay check - hasWorkout:', hasWorkout);
       setIsWorkoutActive(hasWorkout);
       
       if (hasWorkout) {
@@ -32,7 +31,6 @@ export function WorkoutOverlay() {
         setDuration(0);
       }
     } catch (error) {
-      console.error('Error checking workout status:', error);
       setIsWorkoutActive(false);
       setDuration(0);
     } finally {

@@ -129,7 +129,6 @@ export const hasWorkoutInProgress = async (): Promise<boolean> => {
   try {
     const exercisesData = await AsyncStorage.getItem(CURRENT_WORKOUT_KEY);
     const hasData = exercisesData !== null && exercisesData !== '[]' && exercisesData.trim() !== '';
-    console.log('hasWorkoutInProgress check:', { exercisesData, hasData });
     return hasData;
   } catch (error) {
     console.error('Error checking workout status:', error);
