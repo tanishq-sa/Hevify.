@@ -290,13 +290,12 @@ export default function TabTwoScreen() {
             </Pressable>
           </View>
 
-          {/* My Routines Collapsible */}
-          <Pressable className="flex-row items-center justify-between mb-3">
+          {/* My Routines */}
+          <View className="mb-3">
             <Text className={`text-base ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
               My Routines ({routines.length})
             </Text>
-            <Text className={isDark ? 'text-gray-400' : 'text-gray-600'}>▼</Text>
-          </Pressable>
+          </View>
 
           {routines.length > 0 && routines.map((routine) => (
             <View key={routine.id} className={`${isDark ? 'bg-card-dark' : 'bg-card'} rounded-lg p-4 mb-3`}>

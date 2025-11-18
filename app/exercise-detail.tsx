@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
 import { ChevronLeft, Dumbbell, MoreVertical, Share2 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import '../global.css';
 
@@ -25,6 +25,7 @@ export default function ExerciseDetailScreen() {
   const [imageLoading, setImageLoading] = useState(true);
   const [workoutHistory, setWorkoutHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [showMenuModal, setShowMenuModal] = useState(false);
 
   // Map muscle names to API format (using exact API muscle group names)
   const mapMuscleToAPI = (muscle: string): string => {
@@ -275,6 +276,33 @@ export default function ExerciseDetailScreen() {
     ];
   };
 
+  const handleShare = async () => {
+    try {
+      let shareText = `${exerciseName}\n\n`;
+      
+      if (primaryMuscle) {
+        shareText += `Primary Muscle: ${primaryMuscle}\n`;
+      }
+      
+      if (secondaryMuscles.length > 0) {
+        shareText += `Secondary Muscles: ${secondaryMuscles.join(', ')}\n`;
+      }
+      
+      shareText += `\nHow to perform ${exerciseName}:\n\n`;
+      const instructions = getExerciseInstructions(exerciseName);
+      instructions.forEach((instruction, index) => {
+        shareText += `${index + 1}. ${instruction}\n`;
+      });
+      
+      await Share.share({
+        message: shareText,
+      });
+      setShowMenuModal(false);
+    } catch (error) {
+      console.error('Error sharing exercise:', error);
+    }
+  };
+
   return (
     <SafeAreaView 
       className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background'}`} 
@@ -289,10 +317,10 @@ export default function ExerciseDetailScreen() {
           {exerciseName}
         </Text>
         <View className="flex-row items-center">
-          <Pressable className="mr-3">
+          <Pressable className="mr-3" onPress={handleShare}>
             <Share2 size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
           </Pressable>
-          <Pressable>
+          <Pressable onPress={() => setShowMenuModal(true)}>
             <MoreVertical size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
           </Pressable>
         </View>
@@ -529,6 +557,35 @@ export default function ExerciseDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Menu Modal */}
+      <Modal
+        visible={showMenuModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMenuModal(false)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onPress={() => setShowMenuModal(false)}
+        >
+          <Pressable
+            className={`rounded-2xl p-4 w-11/12 max-w-sm ${isDark ? 'bg-card-dark' : 'bg-card'}`}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Pressable
+              className="flex-row items-center py-3 px-4 rounded-lg active:opacity-70"
+              onPress={handleShare}
+            >
+              <Share2 size={20} color={isDark ? '#F5F5F5' : '#11181C'} />
+              <Text className={`ml-3 text-base ${isDark ? 'text-foreground-dark' : 'text-foreground'}`}>
+                Share Exercise
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }

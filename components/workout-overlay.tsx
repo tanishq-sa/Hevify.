@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter, useSegments } from 'expo-router';
 import { Play, X } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import '../global.css';
 
 export function WorkoutOverlay() {
@@ -11,10 +12,14 @@ export function WorkoutOverlay() {
   const isDark = colorScheme === 'dark';
   const router = useRouter();
   const segments = useSegments();
+  const insets = useSafeAreaInsets();
   const [isWorkoutActive, setIsWorkoutActive] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
+  
+  // Tab bar height is typically 49-56px, plus safe area bottom
+  const tabBarHeight = 49 + insets.bottom;
 
   // Hide overlay when on log-workout screen
   const isOnWorkoutScreen = segments.some(segment => segment === 'log-workout');
@@ -98,7 +103,7 @@ export function WorkoutOverlay() {
         isDark ? 'bg-card-dark' : 'bg-card'
       }`}
       style={{
-        bottom: 83, // Position above tab bar with more spacing
+        bottom: tabBarHeight, // Position directly above tab bar
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         shadowColor: '#000',
@@ -127,8 +132,8 @@ export function WorkoutOverlay() {
           >
             <Play 
               size={18} 
-              color="#000000" 
-              fill="#000000" 
+              color="#FFFFFF" 
+              fill="#FFFFFF" 
             />
             <Text className="text-white font-semibold ml-2 text-base">
               Resume

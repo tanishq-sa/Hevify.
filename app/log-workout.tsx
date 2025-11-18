@@ -70,6 +70,7 @@ export default function LogWorkoutScreen() {
   const [discardModal, setDiscardModal] = useState(false);
   const isDiscardingRef = useRef(false);
   const isSavingRef = useRef(false); // Track if navigating to save-workout
+  const hasInitializedRef = useRef(false); // Track if workout has been initialized
   const [clockMode, setClockMode] = useState<'timer' | 'stopwatch'>('timer');
   const [clockTime, setClockTime] = useState(DEFAULT_CLOCK_TIMER);
   const [clockRunning, setClockRunning] = useState(false);
@@ -82,6 +83,9 @@ export default function LogWorkoutScreen() {
 
   useEffect(() => {
     const loadData = async () => {
+      // Only initialize once per component mount
+      if (hasInitializedRef.current) return;
+      
       const { exercises: savedExercises, duration: savedDuration } = await loadWorkoutData();
       if (savedExercises.length > 0) {
         const migratedExercises = savedExercises.map(ex => ({
@@ -94,6 +98,11 @@ export default function LogWorkoutScreen() {
         setExercises(migratedExercises);
         setDuration(savedDuration);
         timerStartTimeRef.current = Date.now() - (savedDuration * 1000);
+        hasInitializedRef.current = true;
+      } else {
+        // Empty workout - initialize timer but don't save empty workout
+        timerStartTimeRef.current = Date.now();
+        hasInitializedRef.current = true;
       }
       setIsLoaded(true);
     };
@@ -109,13 +118,15 @@ export default function LogWorkoutScreen() {
       // Handle pending exercises first (new exercises to add)
       const newExercises = getPendingExercises();
       if (newExercises.length > 0) {
+        // Mark as initialized when adding exercises
+        hasInitializedRef.current = true;
         const workoutExercises: WorkoutExercise[] = newExercises.map((ex: any) => {
           // If routine sets are provided, use them; otherwise create a default set
           const sets = ex.routineSets && ex.routineSets.length > 0
             ? ex.routineSets.map((routineSet: any, index: number) => ({
                 id: Date.now().toString() + Math.random() + index,
                 weight: routineSet.weight !== undefined ? routineSet.weight : 0,
-                reps: routineSet.reps !== undefined ? routineSet.reps : 0,
+                reps: routineSet.reps !== undefined ? routineSet.reps : (routineSet.repRange ? 0 : 0), // Set to 0 if repRange exists, will display repRange instead
                 rpe: null,
                 completed: false,
                 setType: '1',
@@ -169,10 +180,37 @@ export default function LogWorkoutScreen() {
           // Don't reload if discarding or if we just saved
           if (isDiscardingRef.current || isSavingRef.current) return;
           
-          // Check if there's actually a workout in progress before reloading
+          // Don't initialize if already initialized (prevents duplicate empty workout creation)
+          if (!hasInitializedRef.current) {
+            // First time loading - check if workout exists
+            const hasWorkout = await hasWorkoutInProgress();
+            if (hasWorkout) {
+              const { exercises: savedExercises, duration: savedDuration } = await loadWorkoutData();
+              if (savedExercises.length > 0) {
+                const migratedExercises = savedExercises.map(ex => ({
+                  ...ex,
+                  sets: ex.sets.map((set: ExerciseSet) => ({
+                    ...set,
+                    setType: set.setType || '1',
+                  })),
+                }));
+                setExercises(migratedExercises);
+                timerStartTimeRef.current = Date.now() - (savedDuration * 1000);
+                const currentDuration = Math.floor((Date.now() - timerStartTimeRef.current) / 1000);
+                setDuration(currentDuration);
+              }
+            } else {
+              // Empty workout - initialize timer but don't save empty workout
+              timerStartTimeRef.current = Date.now();
+            }
+            hasInitializedRef.current = true;
+            return;
+          }
+          
+          // Already initialized - only reload if workout exists
           const hasWorkout = await hasWorkoutInProgress();
           if (!hasWorkout) {
-            // No workout in progress, clear state
+            // No workout in progress, clear state but keep timer running
             setExercises([]);
             setDuration(0);
             return;
@@ -721,7 +759,9 @@ export default function LogWorkoutScreen() {
 
           <Pressable 
             className={`w-full py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-            onPress={() => setDiscardModal(true)}
+            onPress={() => {
+              setDiscardModal(true);
+            }}
           >
             <X size={20} color="#EF4444" />
             <Text className="mt-2 text-destructive">
@@ -785,9 +825,14 @@ export default function LogWorkoutScreen() {
               <Pressable
                 className="flex-row items-center mb-4"
                 onPress={() => {
-                  if (!isActionInProgressRef.current) {
+                  if (!isActionInProgressRef.current && !restTimerModal.isOpen) {
                     isActionInProgressRef.current = true;
-                    setRestTimerModal({ isOpen: true, exerciseId: exercise.id });
+                    // Close any existing modal first, then open for this exercise
+                    setRestTimerModal({ isOpen: false, exerciseId: null });
+                    setTimeout(() => {
+                      setRestTimerModal({ isOpen: true, exerciseId: exercise.id });
+                      isActionInProgressRef.current = false;
+                    }, 100);
                   }
                 }}
               >
@@ -927,29 +972,55 @@ export default function LogWorkoutScreen() {
                       />
                     </View>
                     <View className="w-16 items-center">
-                      <TextInput
-                        className={`text-sm text-center bg-transparent`}
-                        value={set.reps.toString()}
-                        onChangeText={(text) => {
-                          const newReps = parseInt(text) || 0;
-                          updateSet(exercise.id, set.id, 'reps', newReps);
-                          // Remove isFromRoutine flag when user edits
-                          if (set.isFromRoutine && newReps !== set.previousReps) {
-                            updateSet(exercise.id, set.id, 'isFromRoutine', false);
-                          }
-                        }}
-                        keyboardType="numeric"
-                        style={{ 
-                          width: '100%',
-                          color: set.completed 
-                            ? '#FFFFFF'
-                            : (set.isFromRoutine && set.reps === set.previousReps
-                              ? (isDark ? '#6B7280' : '#9CA3AF') // Gray for routine values
-                              : set.reps === 0 
-                              ? (isDark ? '#9BA1A6' : '#687076')
-                              : (isDark ? '#F5F5F5' : '#11181C'))
-                        }}
-                      />
+                      {set.previousRepRange && set.isFromRoutine && (!set.previousReps || set.reps === 0) ? (
+                        <TextInput
+                          className={`text-sm text-center bg-transparent`}
+                          value={set.previousRepRange}
+                          onChangeText={(text) => {
+                            // User is editing - convert to numeric reps if they type a number
+                            const numericValue = parseInt(text);
+                            if (!isNaN(numericValue)) {
+                              updateSet(exercise.id, set.id, 'reps', numericValue);
+                              updateSet(exercise.id, set.id, 'isFromRoutine', false);
+                            } else if (text.trim() === '') {
+                              // Allow clearing
+                              updateSet(exercise.id, set.id, 'reps', 0);
+                              updateSet(exercise.id, set.id, 'isFromRoutine', false);
+                            }
+                          }}
+                          keyboardType="default"
+                          style={{ 
+                            width: '100%',
+                            color: set.completed 
+                              ? '#FFFFFF'
+                              : (isDark ? '#6B7280' : '#9CA3AF') // Gray for routine repRange values
+                          }}
+                        />
+                      ) : (
+                        <TextInput
+                          className={`text-sm text-center bg-transparent`}
+                          value={set.reps.toString()}
+                          onChangeText={(text) => {
+                            const newReps = parseInt(text) || 0;
+                            updateSet(exercise.id, set.id, 'reps', newReps);
+                            // Remove isFromRoutine flag when user edits
+                            if (set.isFromRoutine && newReps !== set.previousReps) {
+                              updateSet(exercise.id, set.id, 'isFromRoutine', false);
+                            }
+                          }}
+                          keyboardType="numeric"
+                          style={{ 
+                            width: '100%',
+                            color: set.completed 
+                              ? '#FFFFFF'
+                              : (set.isFromRoutine && set.reps === set.previousReps
+                                ? (isDark ? '#6B7280' : '#9CA3AF') // Gray for routine values
+                                : set.reps === 0 
+                                ? (isDark ? '#9BA1A6' : '#687076')
+                                : (isDark ? '#F5F5F5' : '#11181C'))
+                          }}
+                        />
+                      )}
                     </View>
                     <View className="w-20 items-center">
                       <Pressable 
@@ -1026,7 +1097,9 @@ export default function LogWorkoutScreen() {
 
           <Pressable 
             className={`px-4 mb-6 py-3 rounded-lg items-center ${isDark ? 'bg-card-dark' : 'bg-card'}`}
-            onPress={() => setDiscardModal(true)}
+            onPress={() => {
+              setDiscardModal(true);
+            }}
           >
             <X size={20} color="#EF4444" />
             <Text className="mt-2 text-destructive">
@@ -1374,13 +1447,17 @@ export default function LogWorkoutScreen() {
                           key={seconds}
                           className={`py-4 px-4 mb-2 rounded-lg ${isSelected ? (isDark ? 'bg-primary-dark' : 'bg-primary') : (isDark ? 'bg-muted-dark' : 'bg-muted')}`}
                           onPress={() => {
-                            setExercises(prev => {
-                              const updated = prev.map(ex => 
-                                ex.id === exercise.id ? { ...ex, restTimer: seconds } : ex
-                              );
-                              saveWorkoutData(updated, duration);
-                              return updated;
-                            });
+                            // Get the current exerciseId from modal state to ensure we update the correct one
+                            const currentExerciseId = restTimerModal.exerciseId;
+                            if (currentExerciseId) {
+                              setExercises(prev => {
+                                const updated = prev.map(ex => 
+                                  ex.id === currentExerciseId ? { ...ex, restTimer: seconds } : ex
+                                );
+                                saveWorkoutData(updated, duration);
+                                return updated;
+                              });
+                            }
                             setRestTimerModal({ isOpen: false, exerciseId: null });
                             isActionInProgressRef.current = false;
                           }}
@@ -1943,6 +2020,8 @@ export default function LogWorkoutScreen() {
                   setExercises([]);
                   setDuration(0);
                   await clearWorkoutData();
+                  // Reset initialization flag so new workout can start
+                  hasInitializedRef.current = false;
                   setDiscardModal(false);
                   router.back();
                 }}
